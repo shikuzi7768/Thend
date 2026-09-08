@@ -34,6 +34,10 @@ local isAutoVoteEnabled = false
 local selectedMapName = "Desert"
 local hasVotedThisSession = false
 
+-- Auto Vote Difficulty Variables
+local isAutoVoteDiffEnabled = false
+local hasVotedDiffThisSession = false
+
 -- System Tracking
 local placedTowersRecord = {}
 local placedTowersPlay = {}
@@ -112,7 +116,7 @@ end
 ScreenGui.Parent = playerGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 240, 0, 455)
+MainFrame.Size = UDim2.new(0, 240, 0, 485)
 MainFrame.Position = UDim2.new(0.02, 0, 0.25, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
@@ -298,10 +302,34 @@ AutoVoteBtn.TextSize = 11
 AutoVoteBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoVoteBtn).CornerRadius = UDim.new(0, 4)
 
+-- Difficulty Input Box
+local DiffNameBox = Instance.new("TextBox")
+DiffNameBox.Size = UDim2.new(0.6, 0, 0, 30)
+DiffNameBox.Position = UDim2.new(0.05, 0, 0, 275)
+DiffNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+DiffNameBox.Text = "Nightmare"
+DiffNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+DiffNameBox.Font = Enum.Font.SourceSans
+DiffNameBox.TextSize = 13
+DiffNameBox.Parent = ContentFrame
+Instance.new("UICorner", DiffNameBox).CornerRadius = UDim.new(0, 4)
+
+-- Auto Vote Difficulty Toggle Button
+local AutoVoteDiffBtn = Instance.new("TextButton")
+AutoVoteDiffBtn.Size = UDim2.new(0.28, 0, 0, 30)
+AutoVoteDiffBtn.Position = UDim2.new(0.67, 0, 0, 275)
+AutoVoteDiffBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+AutoVoteDiffBtn.Text = "Diff ON"
+AutoVoteDiffBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoVoteDiffBtn.Font = Enum.Font.SourceSansBold
+AutoVoteDiffBtn.TextSize = 11
+AutoVoteDiffBtn.Parent = ContentFrame
+Instance.new("UICorner", AutoVoteDiffBtn).CornerRadius = UDim.new(0, 4)
+
 -- Detailed Status Info Label
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0.9, 0, 0, 135)
-StatusLabel.Position = UDim2.new(0.05, 0, 0, 280)
+StatusLabel.Position = UDim2.new(0.05, 0, 0, 315)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 StatusLabel.Text = "Status: Ready\nSilahkan pilih Macro atau mulai Recording."
 StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
@@ -321,7 +349,7 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         ContentFrame.Visible = false
         MinimizeBtn.Text = "+"
     else
-        MainFrame.Size = UDim2.new(0, 240, 0, 455)
+        MainFrame.Size = UDim2.new(0, 240, 0, 485)
         ContentFrame.Visible = true
         MinimizeBtn.Text = "-"
     end
@@ -339,8 +367,10 @@ saveConfigToFile = function()
     local configData = {
         autoPlay = isAutoPlayEnabled,
         autoVote = isAutoVoteEnabled,
+        autoVoteDiff = isAutoVoteDiffEnabled,
         auto2xSpeed = is2xSpeedEnabled,
         mapName = MapNameBox.Text,
+        diffName = DiffNameBox.Text,
         selectedMacro = selectedMacroFile,
         saveInputText = SaveNameBox.Text
     }
@@ -366,6 +396,12 @@ loadConfigFromFile = function()
             AutoVoteBtn.BackgroundColor3 = isAutoVoteEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
 
+        if result.autoVoteDiff ~= nil then
+            isAutoVoteDiffEnabled = result.autoVoteDiff
+            AutoVoteDiffBtn.Text = isAutoVoteDiffEnabled and "Diff ON" or "Diff OFF"
+            AutoVoteDiffBtn.BackgroundColor3 = isAutoVoteDiffEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+        end
+
         if result.auto2xSpeed ~= nil then
             is2xSpeedEnabled = result.auto2xSpeed
             Speed2xBtn.Text = is2xSpeedEnabled and "2x Speed: ON" or "2x Speed: OFF"
@@ -373,6 +409,7 @@ loadConfigFromFile = function()
         end
 
         if result.mapName then MapNameBox.Text = result.mapName end
+        if result.diffName then DiffNameBox.Text = result.diffName end
         if result.saveInputText then SaveNameBox.Text = result.saveInputText end
         if result.selectedMacro and result.selectedMacro ~= "" then loadMacroFromFile(result.selectedMacro) end
     end
@@ -550,7 +587,6 @@ local function playMacro()
         return
     end
 
-    -- Terapkan 2x speed jika opsi diaktifkan
     if is2xSpeedEnabled then
         setGameSpeed(2)
     end
@@ -565,7 +601,6 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            -- Penyesuaian Speed multiplier: Jika 2x Speed Aktif, waktu tunggu x1 dibagi 2
             local currentMultiplier = is2xSpeedEnabled and 2 or 1
             local targetTime = action.time / currentMultiplier
             local timeToWait = targetTime - (tick() - playStartTime)
@@ -729,6 +764,13 @@ AutoVoteBtn.MouseButton1Click:Connect(function()
     saveConfigToFile()
 end)
 
+AutoVoteDiffBtn.MouseButton1Click:Connect(function()
+    isAutoVoteDiffEnabled = not isAutoVoteDiffEnabled
+    AutoVoteDiffBtn.Text = isAutoVoteDiffEnabled and "Diff ON" or "Diff OFF"
+    AutoVoteDiffBtn.BackgroundColor3 = isAutoVoteDiffEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+    saveConfigToFile()
+end)
+
 loadConfigFromFile()
 
 -- ==========================================
@@ -745,6 +787,7 @@ task.spawn(function()
     while true do
         task.wait(1)
 
+        -- Auto Vote Map
         if isAutoVoteEnabled and not hasVotedThisSession then
             local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
             local voteMapRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForMap") or eventsFolder:FindFirstChild("VoteMap"))
@@ -754,8 +797,17 @@ task.spawn(function()
             end
         end
 
+        -- Auto Vote Difficulty
+        if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
+            local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+            local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
+            if voteDiffRemote then
+                voteDiffRemote:FireServer(DiffNameBox.Text)
+                hasVotedDiffThisSession = true
+            end
+        end
+
         if isMatchActuallyStarted() then
-            -- Set 2x speed secara otomatis saat game dimulai jika tombol 2x Speed ON
             if is2xSpeedEnabled then
                 setGameSpeed(2)
             end
@@ -771,6 +823,7 @@ task.spawn(function()
         else
             hasAutoPlayedThisSession = false
             hasVotedThisSession = false
+            hasVotedDiffThisSession = false
         end
     end
 end)
