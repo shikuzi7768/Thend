@@ -780,6 +780,51 @@ end)
 loadConfigFromFile()
 
 -- ==========================================
+-- SMART AUTO VOTE MAP FUNCTION
+-- ==========================================
+local function executeMapVote()
+    local mapInput = MapNameBox.Text
+    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap"})
+    if not voteMapRemote then return end
+
+    local targetChoice = nil
+    local numInput = tonumber(mapInput)
+
+    -- 1. Jika user mengetik angka slot (contoh: 1, 2, atau 3)
+    if numInput then
+        targetChoice = numInput
+    else
+        -- 2. Pindai PlayerGui untuk mencocokkan nama peta dengan slot pilihan yang aktif
+        pcall(function()
+            for _, gui in ipairs(playerGui:GetChildren()) do
+                if gui:IsA("ScreenGui") and (string.find(string.lower(gui.Name), "vote") or string.find(string.lower(gui.Name), "map")) then
+                    for _, desc in ipairs(gui:GetDescendants()) do
+                        if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and string.find(string.lower(desc.Text), string.lower(mapInput)) then
+                            local slotNum = desc.Name:match("%d+") or (desc.Parent and desc.Parent.Name:match("%d+"))
+                            if slotNum then
+                                targetChoice = tonumber(slotNum) or slotNum
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    -- 3. Kirim Remote Vote
+    pcall(function()
+        if targetChoice then
+            voteMapRemote:FireServer(targetChoice)
+            logConsole(string.format("Auto Vote Map dikirim via Slot/Pilihan: %s", tostring(targetChoice)))
+        else
+            voteMapRemote:FireServer(mapInput)
+            logConsole("Auto Vote Map dikirim via Nama String: " .. mapInput)
+        end
+    end)
+end
+
+-- ==========================================
 -- AUTO PLAY & VOTE LOOP
 -- ==========================================
 local function isMatchActuallyStarted()
@@ -797,21 +842,18 @@ task.spawn(function()
         if (isAutoVoteEnabled or isAutoVoteDiffEnabled) and not hasVotedThisSession then
             hasVotedThisSession = true
             task.spawn(function()
-                -- 1. Fire Auto Vote Map
+                -- 1. Fire Auto Vote Map (Diulang 3x untuk memastikan server menerima pilihan)
                 if isAutoVoteEnabled then
-                    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap"})
-                    if voteMapRemote then
-                        pcall(function()
-                            voteMapRemote:FireServer(MapNameBox.Text)
-                        end)
-                        logConsole("Auto Vote Map dikirim: " .. MapNameBox.Text)
+                    for attempt = 1, 3 do
+                        executeMapVote()
+                        task.wait(0.5)
                     end
                 end
 
-                -- 2. Jeda 5 Detik sebelum Vote Difficulty
+                -- 2. Jeda 5 detik sebelum Vote Difficulty
                 task.wait(5)
 
-                -- 3. Fire Auto Vote Difficulty (Diulang 5x per 1s agar tepat waktu saat GUI muncul)
+                -- 3. Fire Auto Vote Difficulty
                 if isAutoVoteDiffEnabled then
                     local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication"})
                     if voteDiffRemote then
