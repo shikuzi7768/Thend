@@ -24,6 +24,7 @@ local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
 local isAutoPlayEnabled = false
+local is2xSpeedEnabled = false
 
 -- Loop & Timing Variables
 local hasAutoPlayedThisSession = false
@@ -45,10 +46,19 @@ end
 local saveConfigToFile, loadConfigFromFile, loadMacroFromFile
 
 -- ==========================================
--- HELPER FUNCTIONS (CASH CHECKER & POS)
+-- HELPER FUNCTIONS (CASH CHECKER, POS, & SPEED)
 -- ==========================================
+local function setGameSpeed(speed)
+    local functionsFolder = ReplicatedStorage:FindFirstChild("Functions")
+    local changeSpeedRemote = functionsFolder and functionsFolder:FindFirstChild("ChangeSpeed")
+    if changeSpeedRemote then
+        pcall(function()
+            changeSpeedRemote:InvokeServer(speed)
+        end)
+    end
+end
+
 local function getPlayerMoney()
-    -- Coba baca uang dari Leaderstats / PlayerData
     local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
     if leaderstats then
         local money = leaderstats:FindFirstChild("Money") or leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Coins")
@@ -61,7 +71,7 @@ local function getPlayerMoney()
         if money then return money.Value end
     end
 
-    return math.huge -- Jika sistem uang tidak ditemukan, lewati pengecekan
+    return math.huge
 end
 
 local function findTowerByPosition(targetCFrame)
@@ -70,7 +80,7 @@ local function findTowerByPosition(targetCFrame)
     if not towersFolder then return nil end
 
     local closestTower = nil
-    local shortestDistance = 3 -- Toleransi jarak 3 studs
+    local shortestDistance = 3
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
         local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
@@ -102,7 +112,7 @@ end
 ScreenGui.Parent = playerGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 240, 0, 420)
+MainFrame.Size = UDim2.new(0, 240, 0, 455)
 MainFrame.Position = UDim2.new(0.02, 0, 0.25, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
@@ -252,10 +262,22 @@ AutoPlayBtn.TextSize = 13
 AutoPlayBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoPlayBtn).CornerRadius = UDim.new(0, 4)
 
+-- 2x Speed Toggle Button
+local Speed2xBtn = Instance.new("TextButton")
+Speed2xBtn.Size = UDim2.new(0.9, 0, 0, 30)
+Speed2xBtn.Position = UDim2.new(0.05, 0, 0, 205)
+Speed2xBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+Speed2xBtn.Text = "2x Speed: OFF"
+Speed2xBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+Speed2xBtn.Font = Enum.Font.SourceSansBold
+Speed2xBtn.TextSize = 13
+Speed2xBtn.Parent = ContentFrame
+Instance.new("UICorner", Speed2xBtn).CornerRadius = UDim.new(0, 4)
+
 -- Map Input Box
 local MapNameBox = Instance.new("TextBox")
 MapNameBox.Size = UDim2.new(0.6, 0, 0, 30)
-MapNameBox.Position = UDim2.new(0.05, 0, 0, 205)
+MapNameBox.Position = UDim2.new(0.05, 0, 0, 240)
 MapNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MapNameBox.Text = "Desert"
 MapNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -267,7 +289,7 @@ Instance.new("UICorner", MapNameBox).CornerRadius = UDim.new(0, 4)
 -- Auto Vote Map Toggle Button
 local AutoVoteBtn = Instance.new("TextButton")
 AutoVoteBtn.Size = UDim2.new(0.28, 0, 0, 30)
-AutoVoteBtn.Position = UDim2.new(0.67, 0, 0, 205)
+AutoVoteBtn.Position = UDim2.new(0.67, 0, 0, 240)
 AutoVoteBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 AutoVoteBtn.Text = "Vote ON"
 AutoVoteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -279,7 +301,7 @@ Instance.new("UICorner", AutoVoteBtn).CornerRadius = UDim.new(0, 4)
 -- Detailed Status Info Label
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0.9, 0, 0, 135)
-StatusLabel.Position = UDim2.new(0.05, 0, 0, 245)
+StatusLabel.Position = UDim2.new(0.05, 0, 0, 280)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 StatusLabel.Text = "Status: Ready\nSilahkan pilih Macro atau mulai Recording."
 StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
@@ -299,7 +321,7 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         ContentFrame.Visible = false
         MinimizeBtn.Text = "+"
     else
-        MainFrame.Size = UDim2.new(0, 240, 0, 420)
+        MainFrame.Size = UDim2.new(0, 240, 0, 455)
         ContentFrame.Visible = true
         MinimizeBtn.Text = "-"
     end
@@ -317,6 +339,7 @@ saveConfigToFile = function()
     local configData = {
         autoPlay = isAutoPlayEnabled,
         autoVote = isAutoVoteEnabled,
+        auto2xSpeed = is2xSpeedEnabled,
         mapName = MapNameBox.Text,
         selectedMacro = selectedMacroFile,
         saveInputText = SaveNameBox.Text
@@ -341,6 +364,12 @@ loadConfigFromFile = function()
             isAutoVoteEnabled = result.autoVote
             AutoVoteBtn.Text = isAutoVoteEnabled and "Vote ON" or "Vote OFF"
             AutoVoteBtn.BackgroundColor3 = isAutoVoteEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+        end
+
+        if result.auto2xSpeed ~= nil then
+            is2xSpeedEnabled = result.auto2xSpeed
+            Speed2xBtn.Text = is2xSpeedEnabled and "2x Speed: ON" or "2x Speed: OFF"
+            Speed2xBtn.BackgroundColor3 = is2xSpeedEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
 
         if result.mapName then MapNameBox.Text = result.mapName end
@@ -507,7 +536,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (WITH AUTO WAIT UPGRADE & CASH SAFETIES)
+-- PLAYBACK ENGINE (WITH SPEED ADAPTATION & CASH SAFETIES)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -521,6 +550,11 @@ local function playMacro()
         return
     end
 
+    -- Terapkan 2x speed jika opsi diaktifkan
+    if is2xSpeedEnabled then
+        setGameSpeed(2)
+    end
+
     isPlaying = true
     placedTowersPlay = {}
     logConsole("--- Memulai Playback Macro ---")
@@ -531,11 +565,18 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            local timeToWait = action.time - (tick() - playStartTime)
+            -- Penyesuaian Speed multiplier: Jika 2x Speed Aktif, waktu tunggu x1 dibagi 2
+            local currentMultiplier = is2xSpeedEnabled and 2 or 1
+            local targetTime = action.time / currentMultiplier
+            local timeToWait = targetTime - (tick() - playStartTime)
+
             while timeToWait > 0 and isPlaying do
-                StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Next: %s\nWait: %.1fs", index, #recordedActions, action.actionType, timeToWait)
-                task.wait(math.min(timeToWait, 0.2))
-                timeToWait = action.time - (tick() - playStartTime)
+                currentMultiplier = is2xSpeedEnabled and 2 or 1
+                targetTime = action.time / currentMultiplier
+                timeToWait = targetTime - (tick() - playStartTime)
+
+                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentMultiplier, index, #recordedActions, action.actionType, timeToWait)
+                task.wait(math.min(timeToWait, 0.1))
             end
 
             if not isPlaying then break end
@@ -587,25 +628,21 @@ local function playMacro()
                 end
 
                 if targetTower then
-                    -- RETRY SYSTEM & SAFELY EXECUTE UPGRADE
                     local successUpgrade = false
-                    local maxAttempts = 10 -- Retry hingga 10 kali (Menunggu Cash)
+                    local maxAttempts = 10
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
                         
-                        -- Coba jalankan upgrade
                         local res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                         
-                        -- Pengecekan sukses upgrade
                         if res ~= false then
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Attempt %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
                             break
                         else
-                            -- Jika gagal (kemungkinan uang kurang), tunggu 1.5 detik lalu coba lagi
                             StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                            task.wait(1.5)
+                            task.wait(1)
                         end
                     end
 
@@ -676,6 +713,15 @@ AutoPlayBtn.MouseButton1Click:Connect(function()
     saveConfigToFile()
 end)
 
+Speed2xBtn.MouseButton1Click:Connect(function()
+    is2xSpeedEnabled = not is2xSpeedEnabled
+    Speed2xBtn.Text = is2xSpeedEnabled and "2x Speed: ON" or "2x Speed: OFF"
+    Speed2xBtn.BackgroundColor3 = is2xSpeedEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+    
+    setGameSpeed(is2xSpeedEnabled and 2 or 1)
+    saveConfigToFile()
+end)
+
 AutoVoteBtn.MouseButton1Click:Connect(function()
     isAutoVoteEnabled = not isAutoVoteEnabled
     AutoVoteBtn.Text = isAutoVoteEnabled and "Vote ON" or "Vote OFF"
@@ -709,6 +755,11 @@ task.spawn(function()
         end
 
         if isMatchActuallyStarted() then
+            -- Set 2x speed secara otomatis saat game dimulai jika tombol 2x Speed ON
+            if is2xSpeedEnabled then
+                setGameSpeed(2)
+            end
+
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 for i = 13, 1, -1 do
