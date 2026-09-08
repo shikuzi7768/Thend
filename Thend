@@ -787,18 +787,26 @@ task.spawn(function()
     while true do
         task.wait(1)
 
-        -- Auto Vote Map
+        -- Sequential Auto Vote (Map -> Delay 5 Detik -> Difficulty)
         if isAutoVoteEnabled and not hasVotedThisSession then
             local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
             local voteMapRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForMap") or eventsFolder:FindFirstChild("VoteMap"))
             if voteMapRemote then
                 voteMapRemote:FireServer(MapNameBox.Text)
                 hasVotedThisSession = true
-            end
-        end
 
-        -- Auto Vote Difficulty
-        if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
+                -- Jika Auto Vote Difficulty diaktifkan, berikan jeda 5 detik
+                if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
+                    task.wait(5)
+                    local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
+                    if voteDiffRemote then
+                        voteDiffRemote:FireServer(DiffNameBox.Text)
+                        hasVotedDiffThisSession = true
+                    end
+                end
+            end
+        elseif isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
+            -- Jalankan vote difficulty langsung jika Auto Vote Map sedang dimatikan
             local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
             local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
             if voteDiffRemote then
