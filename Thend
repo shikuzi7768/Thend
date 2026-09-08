@@ -787,39 +787,38 @@ task.spawn(function()
     while true do
         task.wait(1)
 
-        -- Sequential Auto Vote (Map -> Delay 5 Detik -> Difficulty)
-        if isAutoVoteEnabled and not hasVotedThisSession then
+        local inMatch = isMatchActuallyStarted()
+
+        -- 1. AUTO VOTE MAP (Hanya berjalan saat di Lobby / Belum dalam match)
+        if isAutoVoteEnabled and not hasVotedThisSession and not inMatch then
             local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
             local voteMapRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForMap") or eventsFolder:FindFirstChild("VoteMap"))
             if voteMapRemote then
                 voteMapRemote:FireServer(MapNameBox.Text)
                 hasVotedThisSession = true
-
-                -- Jika Auto Vote Difficulty diaktifkan, berikan jeda 5 detik
-                if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
-                    task.wait(5)
-                    local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
-                    if voteDiffRemote then
-                        voteDiffRemote:FireServer(DiffNameBox.Text)
-                        hasVotedDiffThisSession = true
-                    end
-                end
-            end
-        elseif isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
-            -- Jalankan vote difficulty langsung jika Auto Vote Map sedang dimatikan
-            local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-            local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
-            if voteDiffRemote then
-                voteDiffRemote:FireServer(DiffNameBox.Text)
-                hasVotedDiffThisSession = true
+                logConsole("Auto Vote Map: " .. MapNameBox.Text)
             end
         end
 
-        if isMatchActuallyStarted() then
+        -- 2. AKSI DI DALAM MATCH
+        if inMatch then
+            -- Auto Vote Difficulty (Dioperasikan segera setelah masuk Match)
+            if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
+                task.wait(0.5) -- Beri jeda kecil agar remote game siap di dalam match
+                local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
+                local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
+                if voteDiffRemote then
+                    voteDiffRemote:FireServer(DiffNameBox.Text)
+                    hasVotedDiffThisSession = true
+                    logConsole("Auto Vote Difficulty: " .. DiffNameBox.Text)
+                end
+            end
+
             if is2xSpeedEnabled then
                 setGameSpeed(2)
             end
 
+            -- Auto Play Macro
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 for i = 13, 1, -1 do
@@ -829,6 +828,7 @@ task.spawn(function()
                 playMacro()
             end
         else
+            -- Reset status ketika sudah kembali ke Lobby
             hasAutoPlayedThisSession = false
             hasVotedThisSession = false
             hasVotedDiffThisSession = false
