@@ -29,14 +29,10 @@ local is2xSpeedEnabled = false
 -- Loop & Timing Variables
 local hasAutoPlayedThisSession = false
 
--- Auto Vote Map Variables
+-- Auto Vote Variables
 local isAutoVoteEnabled = false
-local selectedMapName = "Desert"
-local hasVotedThisSession = false
-
--- Auto Vote Difficulty Variables
 local isAutoVoteDiffEnabled = false
-local hasVotedDiffThisSession = false
+local hasVotedThisSession = false
 
 -- System Tracking
 local placedTowersRecord = {}
@@ -98,6 +94,16 @@ local function findTowerByPosition(targetCFrame)
     end
 
     return closestTower
+end
+
+local function getEventRemote(nameList)
+    local events = ReplicatedStorage:FindFirstChild("Events")
+    if not events then return nil end
+    for _, name in ipairs(nameList) do
+        local remote = events:FindFirstChild(name)
+        if remote then return remote end
+    end
+    return nil
 end
 
 -- ==========================================
@@ -787,38 +793,46 @@ task.spawn(function()
     while true do
         task.wait(1)
 
-        local inMatch = isMatchActuallyStarted()
+        -- SEQUENTIAL VOTE LOGIC (Map -> Wait 5s -> Retry Difficulty)
+        if (isAutoVoteEnabled or isAutoVoteDiffEnabled) and not hasVotedThisSession then
+            hasVotedThisSession = true
+            task.spawn(function()
+                -- 1. Fire Auto Vote Map
+                if isAutoVoteEnabled then
+                    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap"})
+                    if voteMapRemote then
+                        pcall(function()
+                            voteMapRemote:FireServer(MapNameBox.Text)
+                        end)
+                        logConsole("Auto Vote Map dikirim: " .. MapNameBox.Text)
+                    end
+                end
 
-        -- 1. AUTO VOTE MAP (Hanya berjalan saat di Lobby / Belum dalam match)
-        if isAutoVoteEnabled and not hasVotedThisSession and not inMatch then
-            local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-            local voteMapRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForMap") or eventsFolder:FindFirstChild("VoteMap"))
-            if voteMapRemote then
-                voteMapRemote:FireServer(MapNameBox.Text)
-                hasVotedThisSession = true
-                logConsole("Auto Vote Map: " .. MapNameBox.Text)
-            end
+                -- 2. Jeda 5 Detik sebelum Vote Difficulty
+                task.wait(5)
+
+                -- 3. Fire Auto Vote Difficulty (Diulang 5x per 1s agar tepat waktu saat GUI muncul)
+                if isAutoVoteDiffEnabled then
+                    local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication"})
+                    if voteDiffRemote then
+                        for attempt = 1, 5 do
+                            pcall(function()
+                                voteDiffRemote:FireServer(DiffNameBox.Text)
+                            end)
+                            logConsole(string.format("Auto Vote Difficulty (%d/5) dikirim: %s", attempt, DiffNameBox.Text))
+                            task.wait(1)
+                        end
+                    end
+                end
+            end)
         end
 
-        -- 2. AKSI DI DALAM MATCH
-        if inMatch then
-            -- Auto Vote Difficulty (Dioperasikan segera setelah masuk Match)
-            if isAutoVoteDiffEnabled and not hasVotedDiffThisSession then
-                task.wait(0.5) -- Beri jeda kecil agar remote game siap di dalam match
-                local eventsFolder = ReplicatedStorage:FindFirstChild("Events")
-                local voteDiffRemote = eventsFolder and (eventsFolder:FindFirstChild("VoteForComplication") or eventsFolder:FindFirstChild("VoteComplication"))
-                if voteDiffRemote then
-                    voteDiffRemote:FireServer(DiffNameBox.Text)
-                    hasVotedDiffThisSession = true
-                    logConsole("Auto Vote Difficulty: " .. DiffNameBox.Text)
-                end
-            end
-
+        -- MATCH HANDLING & AUTO PLAY
+        if isMatchActuallyStarted() then
             if is2xSpeedEnabled then
                 setGameSpeed(2)
             end
 
-            -- Auto Play Macro
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 for i = 13, 1, -1 do
@@ -828,10 +842,8 @@ task.spawn(function()
                 playMacro()
             end
         else
-            -- Reset status ketika sudah kembali ke Lobby
             hasAutoPlayedThisSession = false
             hasVotedThisSession = false
-            hasVotedDiffThisSession = false
         end
     end
 end)
