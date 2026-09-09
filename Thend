@@ -500,7 +500,7 @@ loadMacroFromFile = function(fileName)
 end
 
 -- ==========================================
--- HOOK RECORDING SYSTEM
+-- HOOK RECORDING SYSTEM (WITH VALIDATION)
 -- ==========================================
 local function getTowerIndexFromRecord(towerInstance)
     for index, instance in pairs(placedTowersRecord) do
@@ -532,6 +532,12 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             if not spawnedTower and args[2] then
                 task.wait(0.1)
                 spawnedTower = findTowerByPosition(args[2])
+            end
+
+            -- PROTEKSI: Jika server menolak placement (misal: uang kurang), JANGAN REKAM!
+            if not spawnedTower and (result == false or result == nil) then
+                logConsole("[REC WARN] SpawnTower gagal (Uang kurang / invalid). Aksi diabaikan.")
+                return result
             end
 
             table.insert(placedTowersRecord, spawnedTower)
@@ -599,7 +605,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (WITH SPEED ADAPTATION & CASH SAFETIES)
+-- PLAYBACK ENGINE (WITH CASH RETRY LOOPS FOR PLACE & UPGRADE)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -645,28 +651,45 @@ local function playMacro()
             if action.actionType == "Place" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
-                local result = spawnRemote:InvokeServer(
-                    action.towerName,
-                    action.cframe,
-                    action.arg3,
-                    action.arg4,
-                    action.arg5
-                )
-
                 local newTowerInstance = nil
-                if typeof(result) == "Instance" then
-                    newTowerInstance = result
-                elseif typeof(result) == "table" and result[1] then
-                    newTowerInstance = result[1]
+                local maxAttempts = 10
+
+                -- RETRY LOOP DENGAN PENUNGGUAN UANG UNTUK PLACE
+                for attempt = 1, maxAttempts do
+                    if not isPlaying then break end
+
+                    local result = spawnRemote:InvokeServer(
+                        action.towerName,
+                        action.cframe,
+                        action.arg3,
+                        action.arg4,
+                        action.arg5
+                    )
+
+                    if typeof(result) == "Instance" then
+                        newTowerInstance = result
+                    elseif typeof(result) == "table" and result[1] then
+                        newTowerInstance = result[1]
+                    end
+
+                    if not newTowerInstance and action.cframe then
+                        task.wait(0.2)
+                        newTowerInstance = findTowerByPosition(action.cframe)
+                    end
+
+                    if newTowerInstance then
+                        placedTowersPlay[action.towerIndex] = newTowerInstance
+                        logConsole(string.format("[PLAY %d/%d] Placed Tower #%d: %s", index, #recordedActions, action.towerIndex, tostring(newTowerInstance)))
+                        break
+                    else
+                        StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                        task.wait(1)
+                    end
                 end
 
-                if not newTowerInstance and action.cframe then
-                    task.wait(0.2)
-                    newTowerInstance = findTowerByPosition(action.cframe)
+                if not newTowerInstance then
+                    logConsole(string.format("[PLAY ERROR] Gagal Place Tower #%d setelah %d percobaan!", action.towerIndex, maxAttempts))
                 end
-
-                placedTowersPlay[action.towerIndex] = newTowerInstance
-                logConsole(string.format("[PLAY %d/%d] Placed Tower #%d: %s", index, #recordedActions, action.towerIndex, tostring(newTowerInstance)))
 
             elseif action.actionType == "Upgrade" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
@@ -697,7 +720,7 @@ local function playMacro()
                         
                         local res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                         
-                        if res ~= false then
+                        if res ~= false and res ~= nil then
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Attempt %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
                             break
@@ -856,7 +879,7 @@ end
 -- ==========================================
 task.spawn(function()
     while true do
-        task.wait(2) -- Interval 2 detik antar summon agar tidak spamming/lag
+        task.wait(2)
         if isAutoSummonEnabled then
             pcall(function()
                 local remotes = ReplicatedStorage:FindFirstChild("Remotes")
