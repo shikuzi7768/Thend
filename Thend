@@ -59,37 +59,23 @@ local function setGameSpeed(speed)
     end
 end
 
-local function getPlayerMoney()
-    local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
-    if leaderstats then
-        local money = leaderstats:FindFirstChild("Money") or leaderstats:FindFirstChild("Cash") or leaderstats:FindFirstChild("Coins")
-        if money then return money.Value end
-    end
-    
-    local playerData = LocalPlayer:FindFirstChild("PlayerData") or LocalPlayer:FindFirstChild("Data")
-    if playerData then
-        local money = playerData:FindFirstChild("Money") or playerData:FindFirstChild("Cash")
-        if money then return money.Value end
-    end
-
-    return math.huge
-end
-
 local function findTowerByPosition(targetCFrame)
     if not targetCFrame then return nil end
-    local towersFolder = Workspace:FindFirstChild("Towers")
+    local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
     local closestTower = nil
-    local shortestDistance = 3
+    local shortestDistance = 4
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
-        local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
-        if primaryPart then
-            local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
-            if dist < shortestDistance then
-                shortestDistance = dist
-                closestTower = tower
+        if tower:IsA("Model") then
+            local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
+            if primaryPart then
+                local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
+                if dist < shortestDistance then
+                    shortestDistance = dist
+                    closestTower = tower
+                end
             end
         end
     end
@@ -456,7 +442,8 @@ local function saveMacroToFile(fileName)
             towerName = action.towerName,
             arg3 = action.arg3,
             arg4 = action.arg4,
-            arg5 = action.arg5
+            arg5 = action.arg5,
+            extraArgs = action.extraArgs
         }
         if action.cframe then copyAction.cframe = serializeCFrame(action.cframe) end
         table.insert(serializedData, copyAction)
@@ -487,7 +474,8 @@ loadMacroFromFile = function(fileName)
             towerName = action.towerName,
             arg3 = action.arg3,
             arg4 = action.arg4,
-            arg5 = action.arg5
+            arg5 = action.arg5,
+            extraArgs = action.extraArgs
         }
         if action.cframe then restoredAction.cframe = deserializeCFrame(action.cframe) end
         table.insert(recordedActions, restoredAction)
@@ -500,9 +488,10 @@ loadMacroFromFile = function(fileName)
 end
 
 -- ==========================================
--- HOOK RECORDING SYSTEM (WITH VALIDATION)
+-- HOOK RECORDING SYSTEM (SMART MATCHING)
 -- ==========================================
 local function getTowerIndexFromRecord(towerInstance)
+    if not towerInstance then return nil end
     for index, instance in pairs(placedTowersRecord) do
         if instance == towerInstance then
             return index
@@ -534,7 +523,6 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 spawnedTower = findTowerByPosition(args[2])
             end
 
-            -- PROTEKSI: Jika server menolak placement (misal: uang kurang), JANGAN REKAM!
             if not spawnedTower and (result == false or result == nil) then
                 logConsole("[REC WARN] SpawnTower gagal (Uang kurang / invalid). Aksi diabaikan.")
                 return result
@@ -570,33 +558,54 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 
             local towerIndex = getTowerIndexFromRecord(targetTower)
 
+            -- SMART FALLBACK 1: Cari berdasarkan jarak terkecil di Workspace
             if not towerIndex and targetTower then
-                local primaryPart = targetTower.PrimaryPart or targetTower:FindFirstChildWhichIsA("BasePart")
-                if primaryPart then
+                local targetPos = nil
+                if typeof(targetTower) == "Instance" then
+                    local primaryPart = targetTower.PrimaryPart or targetTower:FindFirstChildWhichIsA("BasePart")
+                    if primaryPart then targetPos = primaryPart.Position end
+                end
+
+                if targetPos then
+                    local shortestDistance = 8
                     for idx, recTower in pairs(placedTowersRecord) do
                         if recTower and recTower:IsDescendantOf(Workspace) then
                             local recPart = recTower.PrimaryPart or recTower:FindFirstChildWhichIsA("BasePart")
-                            if recPart and (recPart.Position - primaryPart.Position).Magnitude < 2 then
-                                towerIndex = idx
-                                break
+                            if recPart then
+                                local dist = (recPart.Position - targetPos).Magnitude
+                                if dist < shortestDistance then
+                                    shortestDistance = dist
+                                    towerIndex = idx
+                                end
                             end
                         end
                     end
                 end
             end
 
+            -- SMART FALLBACK 2: Jika masih belum terdeteksi, jadikan tower terakhir yang dipasang sebagai target
+            if not towerIndex and #placedTowersRecord > 0 then
+                towerIndex = #placedTowersRecord
+            end
+
             if towerIndex then
+                local extraArgs = {}
+                for i = 2, #args do
+                    table.insert(extraArgs, args[i])
+                end
+
                 table.insert(recordedActions, {
                     actionType = "Upgrade",
                     time = currentTime,
                     towerIndex = towerIndex,
-                    towerName = towerName
+                    towerName = towerName,
+                    extraArgs = extraArgs
                 })
 
                 logConsole(string.format("[REC] Upgrade Tower #%d: %s", towerIndex, tostring(towerName)))
                 StatusLabel.Text = string.format("Status: Recording...\n[Aksi %d] Upgrade Tower #%d", #recordedActions, towerIndex)
             else
-                logConsole("[REC WARN] Target Tower Upgrade gagal diidentifikasi!")
+                logConsole("[REC WARN] Upgrade gagal direkam: Tidak ada tower yang terdaftar.")
             end
         end
     end
@@ -605,7 +614,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (WITH CASH RETRY LOOPS FOR PLACE & UPGRADE)
+-- PLAYBACK ENGINE (UPGRADE RETRY & POSITION FIX)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -654,7 +663,6 @@ local function playMacro()
                 local newTowerInstance = nil
                 local maxAttempts = 10
 
-                -- RETRY LOOP DENGAN PENUNGGUAN UANG UNTUK PLACE
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
@@ -696,7 +704,8 @@ local function playMacro()
 
                 local targetTower = placedTowersPlay[action.towerIndex]
 
-                if not targetTower then
+                -- FALLBACK PLAYBACK: Jika tower tidak ada di memori, lacak via CFrame posisi awal pasang
+                if not targetTower or not targetTower:IsDescendantOf(Workspace) then
                     local correspondingPlaceAction = nil
                     for _, act in ipairs(recordedActions) do
                         if act.actionType == "Place" and act.towerIndex == action.towerIndex then
@@ -713,19 +722,25 @@ local function playMacro()
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 10
+                    local maxAttempts = 15
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
                         
-                        local res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                        local res
+                        if action.extraArgs and #action.extraArgs > 0 then
+                            res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
+                        else
+                            res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                        end
                         
-                        if res ~= false and res ~= nil then
+                        -- Menganggap berhasil jika return bukan 'false'
+                        if res ~= false then
                             successUpgrade = true
-                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Attempt %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
+                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
                             break
                         else
-                            StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                            StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
                             task.wait(1)
                         end
                     end
@@ -734,7 +749,7 @@ local function playMacro()
                         logConsole(string.format("[PLAY WARN] Upgrade Tower #%d Gagal setelah %d Percobaan!", action.towerIndex, maxAttempts))
                     end
                 else
-                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan!", action.towerIndex))
+                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
                 end
             end
         end
@@ -840,11 +855,9 @@ local function executeMapVote()
     local targetChoice = nil
     local numInput = tonumber(mapInput)
 
-    -- 1. Jika user mengetik angka slot (contoh: 1, 2, atau 3)
     if numInput then
         targetChoice = numInput
     else
-        -- 2. Pindai PlayerGui untuk mencocokkan nama peta dengan slot pilihan yang aktif
         pcall(function()
             for _, gui in ipairs(playerGui:GetChildren()) do
                 if gui:IsA("ScreenGui") and (string.find(string.lower(gui.Name), "vote") or string.find(string.lower(gui.Name), "map")) then
@@ -862,7 +875,6 @@ local function executeMapVote()
         end)
     end
 
-    -- 3. Kirim Remote Vote
     pcall(function()
         if targetChoice then
             voteMapRemote:FireServer(targetChoice)
@@ -909,11 +921,9 @@ task.spawn(function()
     while true do
         task.wait(1)
 
-        -- SEQUENTIAL VOTE LOGIC (Map -> Wait 5s -> Retry Difficulty)
         if (isAutoVoteEnabled or isAutoVoteDiffEnabled) and not hasVotedThisSession then
             hasVotedThisSession = true
             task.spawn(function()
-                -- 1. Fire Auto Vote Map (Diulang 3x untuk memastikan server menerima pilihan)
                 if isAutoVoteEnabled then
                     for attempt = 1, 3 do
                         executeMapVote()
@@ -921,10 +931,8 @@ task.spawn(function()
                     end
                 end
 
-                -- 2. Jeda 5 detik sebelum Vote Difficulty
                 task.wait(5)
 
-                -- 3. Fire Auto Vote Difficulty
                 if isAutoVoteDiffEnabled then
                     local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication"})
                     if voteDiffRemote then
@@ -940,7 +948,6 @@ task.spawn(function()
             end)
         end
 
-        -- MATCH HANDLING & AUTO PLAY
         if isMatchActuallyStarted() then
             if is2xSpeedEnabled then
                 setGameSpeed(2)
@@ -960,3 +967,4 @@ task.spawn(function()
         end
     end
 end)
+
