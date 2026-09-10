@@ -640,7 +640,6 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            -- Penyesuaian timing dinamis berdasarkan speed multiplier
             local targetTime = action.time / currentSpeedMultiplier
             local timeToWait = targetTime - (tick() - playStartTime)
 
@@ -649,13 +648,11 @@ local function playMacro()
                 timeToWait = targetTime - (tick() - playStartTime)
 
                 StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, timeToWait)
-                -- Gunakan task.wait yang rapat agar sinkronisasi x5 tetap presisi
                 task.wait(math.min(timeToWait, 0.03))
             end
 
             if not isPlaying then break end
 
-            -- Hitung jeda retry dinamis berdasarkan multiplier kecepatan
             local retryDelay = math.max(0.05, 0.2 / currentSpeedMultiplier)
 
             if action.actionType == "Place" then
@@ -692,7 +689,6 @@ local function playMacro()
                         break
                     else
                         StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        -- Jeda dipotong secara dinamis mengikuti kecepatan x5
                         task.wait(retryDelay)
                     end
                 end
@@ -741,7 +737,6 @@ local function playMacro()
                             break
                         else
                             StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                            -- Jeda dipotong secara dinamis mengikuti kecepatan x5
                             task.wait(retryDelay)
                         end
                     end
@@ -962,9 +957,8 @@ task.spawn(function()
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 
-                -- Penyesuaian waktu tunggu spawn buffer disesuaikan dengan x5 speed
-                local bufferWait = math.ceil(13 / currentSpeedMultiplier)
-                for i = bufferWait, 1, -1 do
+                -- Spawn buffer tetap 13 detik penuh
+                for i = 13, 1, -1 do
                     StatusLabel.Text = string.format("Status: Match Detected!\nWaiting Spawn Buffer: %d s", i)
                     task.wait(1)
                 end
