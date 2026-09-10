@@ -24,7 +24,7 @@ local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
 local isAutoPlayEnabled = false
-local is2xSpeedEnabled = false
+local currentSpeedMultiplier = 1 -- Menggantikan is2xSpeedEnabled (1, 2, atau 5)
 local isAutoSummonEnabled = false
 
 -- Loop & Timing Variables
@@ -259,17 +259,17 @@ AutoPlayBtn.TextSize = 13
 AutoPlayBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoPlayBtn).CornerRadius = UDim.new(0, 4)
 
--- 2x Speed Toggle Button
-local Speed2xBtn = Instance.new("TextButton")
-Speed2xBtn.Size = UDim2.new(0.9, 0, 0, 30)
-Speed2xBtn.Position = UDim2.new(0.05, 0, 0, 205)
-Speed2xBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
-Speed2xBtn.Text = "2x Speed: OFF"
-Speed2xBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-Speed2xBtn.Font = Enum.Font.SourceSansBold
-Speed2xBtn.TextSize = 13
-Speed2xBtn.Parent = ContentFrame
-Instance.new("UICorner", Speed2xBtn).CornerRadius = UDim.new(0, 4)
+-- Speed Multiplier Toggle Button
+local SpeedBtn = Instance.new("TextButton")
+SpeedBtn.Size = UDim2.new(0.9, 0, 0, 30)
+SpeedBtn.Position = UDim2.new(0.05, 0, 0, 205)
+SpeedBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+SpeedBtn.Text = "Speed: 1x"
+SpeedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedBtn.Font = Enum.Font.SourceSansBold
+SpeedBtn.TextSize = 13
+SpeedBtn.Parent = ContentFrame
+Instance.new("UICorner", SpeedBtn).CornerRadius = UDim.new(0, 4)
 
 -- Map Input Box
 local MapNameBox = Instance.new("TextBox")
@@ -373,7 +373,7 @@ saveConfigToFile = function()
         autoPlay = isAutoPlayEnabled,
         autoVote = isAutoVoteEnabled,
         autoVoteDiff = isAutoVoteDiffEnabled,
-        auto2xSpeed = is2xSpeedEnabled,
+        speedMultiplier = currentSpeedMultiplier,
         autoSummon = isAutoSummonEnabled,
         mapName = MapNameBox.Text,
         diffName = DiffNameBox.Text,
@@ -408,10 +408,10 @@ loadConfigFromFile = function()
             AutoVoteDiffBtn.BackgroundColor3 = isAutoVoteDiffEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
 
-        if result.auto2xSpeed ~= nil then
-            is2xSpeedEnabled = result.auto2xSpeed
-            Speed2xBtn.Text = is2xSpeedEnabled and "2x Speed: ON" or "2x Speed: OFF"
-            Speed2xBtn.BackgroundColor3 = is2xSpeedEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+        if result.speedMultiplier ~= nil then
+            currentSpeedMultiplier = result.speedMultiplier
+            SpeedBtn.Text = "Speed: " .. currentSpeedMultiplier .. "x"
+            SpeedBtn.BackgroundColor3 = (currentSpeedMultiplier > 1) and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
 
         if result.autoSummon ~= nil then
@@ -558,7 +558,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 
             local towerIndex = getTowerIndexFromRecord(targetTower)
 
-            -- SMART FALLBACK 1: Cari berdasarkan jarak terkecil di Workspace
+            -- SMART FALLBACK 1
             if not towerIndex and targetTower then
                 local targetPos = nil
                 if typeof(targetTower) == "Instance" then
@@ -583,7 +583,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
             end
 
-            -- SMART FALLBACK 2: Jika masih belum terdeteksi, jadikan tower terakhir yang dipasang sebagai target
+            -- SMART FALLBACK 2
             if not towerIndex and #placedTowersRecord > 0 then
                 towerIndex = #placedTowersRecord
             end
@@ -614,7 +614,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (UPGRADE RETRY & POSITION FIX)
+-- PLAYBACK ENGINE (UPGRADE RETRY & SPEED FIX)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -628,9 +628,7 @@ local function playMacro()
         return
     end
 
-    if is2xSpeedEnabled then
-        setGameSpeed(2)
-    end
+    setGameSpeed(currentSpeedMultiplier)
 
     isPlaying = true
     placedTowersPlay = {}
@@ -642,16 +640,15 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            local currentMultiplier = is2xSpeedEnabled and 2 or 1
-            local targetTime = action.time / currentMultiplier
+            -- Penyesuaian timing dinamis berdasarkan speed multiplier
+            local targetTime = action.time / currentSpeedMultiplier
             local timeToWait = targetTime - (tick() - playStartTime)
 
             while timeToWait > 0 and isPlaying do
-                currentMultiplier = is2xSpeedEnabled and 2 or 1
-                targetTime = action.time / currentMultiplier
+                targetTime = action.time / currentSpeedMultiplier
                 timeToWait = targetTime - (tick() - playStartTime)
 
-                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentMultiplier, index, #recordedActions, action.actionType, timeToWait)
+                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, timeToWait)
                 task.wait(math.min(timeToWait, 0.1))
             end
 
@@ -704,7 +701,6 @@ local function playMacro()
 
                 local targetTower = placedTowersPlay[action.towerIndex]
 
-                -- FALLBACK PLAYBACK: Jika tower tidak ada di memori, lacak via CFrame posisi awal pasang
                 if not targetTower or not targetTower:IsDescendantOf(Workspace) then
                     local correspondingPlaceAction = nil
                     for _, act in ipairs(recordedActions) do
@@ -734,7 +730,6 @@ local function playMacro()
                             res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                         end
                         
-                        -- Menganggap berhasil jika return bukan 'false'
                         if res ~= false then
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
@@ -812,12 +807,19 @@ AutoPlayBtn.MouseButton1Click:Connect(function()
     saveConfigToFile()
 end)
 
-Speed2xBtn.MouseButton1Click:Connect(function()
-    is2xSpeedEnabled = not is2xSpeedEnabled
-    Speed2xBtn.Text = is2xSpeedEnabled and "2x Speed: ON" or "2x Speed: OFF"
-    Speed2xBtn.BackgroundColor3 = is2xSpeedEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+SpeedBtn.MouseButton1Click:Connect(function()
+    if currentSpeedMultiplier == 1 then
+        currentSpeedMultiplier = 2
+    elseif currentSpeedMultiplier == 2 then
+        currentSpeedMultiplier = 5
+    else
+        currentSpeedMultiplier = 1
+    end
     
-    setGameSpeed(is2xSpeedEnabled and 2 or 1)
+    SpeedBtn.Text = "Speed: " .. currentSpeedMultiplier .. "x"
+    SpeedBtn.BackgroundColor3 = (currentSpeedMultiplier > 1) and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+    
+    setGameSpeed(currentSpeedMultiplier)
     saveConfigToFile()
 end)
 
@@ -949,9 +951,7 @@ task.spawn(function()
         end
 
         if isMatchActuallyStarted() then
-            if is2xSpeedEnabled then
-                setGameSpeed(2)
-            end
+            setGameSpeed(currentSpeedMultiplier)
 
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
@@ -967,4 +967,3 @@ task.spawn(function()
         end
     end
 end)
-
