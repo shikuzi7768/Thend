@@ -24,7 +24,7 @@ local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
 local isAutoPlayEnabled = false
-local currentSpeedMultiplier = 1 -- Menggantikan is2xSpeedEnabled (1, 2, atau 5)
+local currentSpeedMultiplier = 1 -- (1, 2, atau 5)
 local isAutoSummonEnabled = false
 
 -- Loop & Timing Variables
@@ -614,7 +614,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (UPGRADE RETRY & SPEED FIX)
+-- PLAYBACK ENGINE (ADAPTIVE SPEED OPTIMIZED)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -649,16 +649,20 @@ local function playMacro()
                 timeToWait = targetTime - (tick() - playStartTime)
 
                 StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, timeToWait)
-                task.wait(math.min(timeToWait, 0.1))
+                -- Gunakan task.wait yang rapat agar sinkronisasi x5 tetap presisi
+                task.wait(math.min(timeToWait, 0.03))
             end
 
             if not isPlaying then break end
+
+            -- Hitung jeda retry dinamis berdasarkan multiplier kecepatan
+            local retryDelay = math.max(0.05, 0.2 / currentSpeedMultiplier)
 
             if action.actionType == "Place" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local newTowerInstance = nil
-                local maxAttempts = 10
+                local maxAttempts = 20
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
@@ -678,7 +682,7 @@ local function playMacro()
                     end
 
                     if not newTowerInstance and action.cframe then
-                        task.wait(0.2)
+                        task.wait(0.05)
                         newTowerInstance = findTowerByPosition(action.cframe)
                     end
 
@@ -688,7 +692,8 @@ local function playMacro()
                         break
                     else
                         StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(1)
+                        -- Jeda dipotong secara dinamis mengikuti kecepatan x5
+                        task.wait(retryDelay)
                     end
                 end
 
@@ -718,7 +723,7 @@ local function playMacro()
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 15
+                    local maxAttempts = 25
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
@@ -736,7 +741,8 @@ local function playMacro()
                             break
                         else
                             StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                            task.wait(1)
+                            -- Jeda dipotong secara dinamis mengikuti kecepatan x5
+                            task.wait(retryDelay)
                         end
                     end
 
@@ -955,7 +961,10 @@ task.spawn(function()
 
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
-                for i = 13, 1, -1 do
+                
+                -- Penyesuaian waktu tunggu spawn buffer disesuaikan dengan x5 speed
+                local bufferWait = math.ceil(13 / currentSpeedMultiplier)
+                for i = bufferWait, 1, -1 do
                     StatusLabel.Text = string.format("Status: Match Detected!\nWaiting Spawn Buffer: %d s", i)
                     task.wait(1)
                 end
