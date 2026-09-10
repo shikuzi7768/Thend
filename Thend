@@ -302,7 +302,7 @@ local MapNameBox = Instance.new("TextBox")
 MapNameBox.Size = UDim2.new(0.6, 0, 0, 30)
 MapNameBox.Position = UDim2.new(0.05, 0, 0, 240)
 MapNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-MapNameBox.Text = "Desert"
+MapNameBox.Text = "Doomspire"
 MapNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
 MapNameBox.Font = Enum.Font.SourceSans
 MapNameBox.TextSize = 13
@@ -451,9 +451,6 @@ loadConfigFromFile = function()
         if result.gameSpeed ~= nil then
             gameSpeedSetting = result.gameSpeed
             updateSpeedUI()
-        elseif result.auto2xSpeed ~= nil then
-            gameSpeedSetting = result.auto2xSpeed and 2 or 1
-            updateSpeedUI()
         end
 
         if result.autoSummon ~= nil then
@@ -530,7 +527,7 @@ loadMacroFromFile = function(fileName)
 end
 
 -- ==========================================
--- HOOK RECORDING SYSTEM (SMART MATCHING)
+-- HOOK RECORDING SYSTEM
 -- ==========================================
 local function getTowerIndexFromRecord(towerInstance)
     if not towerInstance then return nil end
@@ -566,7 +563,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
 
             if not spawnedTower and (result == false or result == nil) then
-                logConsole("[REC WARN] SpawnTower gagal (Uang kurang / invalid). Aksi diabaikan.")
+                logConsole("[REC WARN] SpawnTower gagal. Aksi diabaikan.")
                 return result
             end
 
@@ -644,8 +641,6 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 
                 logConsole(string.format("[REC] Upgrade Tower #%d: %s", towerIndex, tostring(towerName)))
                 StatusLabel.Text = string.format("Status: Recording...\n[Aksi %d] Upgrade Tower #%d", #recordedActions, towerIndex)
-            else
-                logConsole("[REC WARN] Upgrade gagal direkam: Tidak ada tower yang terdaftar.")
             end
         end
     end
@@ -654,7 +649,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (UPGRADE RETRY & POSITION FIX)
+-- PLAYBACK ENGINE
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -735,10 +730,6 @@ local function playMacro()
                     end
                 end
 
-                if not newTowerInstance then
-                    logConsole(string.format("[PLAY ERROR] Gagal Place Tower #%d setelah %d percobaan!", action.towerIndex, maxAttempts))
-                end
-
             elseif action.actionType == "Upgrade" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
 
@@ -775,19 +766,13 @@ local function playMacro()
                         
                         if res ~= false then
                             successUpgrade = true
-                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
+                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                             break
                         else
                             StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
                             task.wait(1)
                         end
                     end
-
-                    if not successUpgrade then
-                        logConsole(string.format("[PLAY WARN] Upgrade Tower #%d Gagal setelah %d Percobaan!", action.towerIndex, maxAttempts))
-                    end
-                else
-                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
                 end
             end
         end
@@ -888,39 +873,78 @@ end)
 loadConfigFromFile()
 
 -- ==========================================
--- SMART AUTO VOTE MAP FUNCTION
+-- SMART & ROBUST AUTO VOTE MAP FUNCTION
 -- ==========================================
 local function executeMapVote()
     local mapInput = MapNameBox.Text
-    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap", "MapVote", "Vote_Map"})
+    mapInput = mapInput:match("^%s*(.-)%s*$") -- Clean whitespace
+
+    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap", "MapVote", "Vote_Map", "Vote"})
     if not voteMapRemote then 
         logConsole("[VOTE ERROR] Remote Map Vote tidak ditemukan!")
         return 
     end
 
-    local targetChoice = tonumber(mapInput)
+    -- Jika input berupa nomor slot langsung (misal: "1", "2", "3")
+    local directSlot = tonumber(mapInput)
+    if directSlot then
+        safeFireRemote(voteMapRemote, directSlot)
+        logConsole("Auto Vote Map dikirim (Nomor Slot): " .. tostring(directSlot))
+        return
+    end
 
-    if not targetChoice then
-        pcall(function()
-            for _, gui in ipairs(playerGui:GetChildren()) do
-                if gui:IsA("ScreenGui") and gui.Enabled then
-                    for _, desc in ipairs(gui:GetDescendants()) do
-                        if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and string.find(string.lower(desc.Text), string.lower(mapInput)) then
-                            local slotNum = desc.Name:match("%d+") or (desc.Parent and desc.Parent.Name:match("%d+"))
-                            if slotNum then
-                                targetChoice = tonumber(slotNum)
-                                break
+    -- Mencari UI Button & Slot tempat nama map muncul di screen
+    local targetButton = nil
+    local detectedSlot = nil
+
+    pcall(function()
+        for _, gui in ipairs(playerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and gui.Enabled then
+                for _, desc in ipairs(gui:GetDescendants()) do
+                    if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and desc.Text ~= "" then
+                        if string.find(string.lower(desc.Text), string.lower(mapInput)) then
+                            targetButton = desc:IsA("TextButton") and desc or desc:FindFirstAncestorWhichIsA("TextButton")
+                            
+                            -- Deteksi nomor slot dari nama parent/frame
+                            local currentObj = desc
+                            for _ = 1, 4 do
+                                if currentObj and currentObj.Parent then
+                                    currentObj = currentObj.Parent
+                                    local slotNum = currentObj.Name:match("%d+")
+                                    if slotNum then
+                                        detectedSlot = tonumber(slotNum)
+                                        break
+                                    end
+                                end
                             end
+                            break
                         end
                     end
                 end
             end
+            if targetButton or detectedSlot then break end
+        end
+    end)
+
+    -- 1. Eksekusi firesignal jika tombol UI fisik ditemukan
+    if targetButton and firesignal then
+        pcall(function()
+            firesignal(targetButton.MouseButton1Click)
+            firesignal(targetButton.Activated)
+            logConsole("[VOTE] Berhasil mensimulasikan Klik Tombol UI Map: " .. mapInput)
         end)
     end
 
-    local payload = targetChoice or mapInput
-    safeFireRemote(voteMapRemote, payload)
-    logConsole("Auto Vote Map dikirim: " .. tostring(payload))
+    -- 2. Kirim payload Nama Map mentah ke Remote
+    safeFireRemote(voteMapRemote, mapInput)
+    logConsole("[VOTE] Mengirim Nama Map ke Remote: " .. mapInput)
+
+    -- 3. Kirim payload Slot Number sebagai cadangan jika terdeteksi
+    if detectedSlot then
+        task.wait(0.2)
+        safeFireRemote(voteMapRemote, detectedSlot)
+        logConsole(string.format("[VOTE] Mengirim Nomor Slot (#%d) ke Remote untuk %s", detectedSlot, mapInput))
+    end
 end
 
 -- ==========================================
@@ -963,13 +987,13 @@ task.spawn(function()
                 hasVotedThisSession = true
                 task.spawn(function()
                     if isAutoVoteEnabled then
-                        for attempt = 1, 3 do
+                        for attempt = 1, 4 do
                             executeMapVote()
-                            task.wait(0.8)
+                            task.wait(0.6)
                         end
                     end
 
-                    task.wait(2)
+                    task.wait(1.5)
 
                     if isAutoVoteDiffEnabled then
                         local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication", "VoteDifficulty", "DifficultyVote"})
@@ -978,7 +1002,7 @@ task.spawn(function()
                             for attempt = 1, 4 do
                                 safeFireRemote(voteDiffRemote, diffValue)
                                 logConsole(string.format("Auto Vote Difficulty (%d/4) dikirim: %s", attempt, tostring(diffValue)))
-                                task.wait(0.8)
+                                task.wait(0.6)
                             end
                         else
                             logConsole("[VOTE ERROR] Remote Difficulty Vote tidak ditemukan!")
@@ -1007,3 +1031,4 @@ task.spawn(function()
         end
     end
 end)
+
