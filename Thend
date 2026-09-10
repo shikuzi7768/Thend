@@ -4,9 +4,10 @@ local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
-local supportsFileSystem = (writefile and readfile and isfolder and makefolder and listfiles) ~= nil
+-- Check Executor File System Support
+local supportsFileSystem = (writefile and readfile and isfolder and makefolder and listfiles)
 if not supportsFileSystem then
-    warn("[Macro System]: Executor kamu tidak mendukung File System!")
+    warn("[Macro System]: Executor kamu tidak mendukung File System (writefile/readfile)!")
 end
 
 local FOLDER_NAME = "TowerMacroData"
@@ -23,50 +24,41 @@ local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
 local isAutoPlayEnabled = false
-local currentSpeedMultiplier = 1
+local gameSpeedSetting = 1 -- 1 = Normal, 2 = 2x Speed, 5 = 5x Speed
 local isAutoSummonEnabled = false
 
+-- Loop & Timing Variables
 local hasAutoPlayedThisSession = false
+
+-- Auto Vote Variables
 local isAutoVoteEnabled = false
 local isAutoVoteDiffEnabled = false
 local hasVotedThisSession = false
 
+-- System Tracking
 local placedTowersRecord = {}
 local placedTowersPlay = {}
-
-local remotesCache = {
-    functions = ReplicatedStorage:FindFirstChild("Functions"),
-    events = ReplicatedStorage:FindFirstChild("Events"),
-    remotes = ReplicatedStorage:FindFirstChild("Remotes")
-}
-
-local function getFunctionRemote(name)
-    return remotesCache.functions and remotesCache.functions:FindFirstChild(name)
-end
-
-local function getEventRemote(nameList)
-    if not remotesCache.events then return nil end
-    for _, name in ipairs(nameList) do
-        local remote = remotesCache.events:FindFirstChild(name)
-        if remote then return remote end
-    end
-    return nil
-end
 
 local function logConsole(msg)
     print(string.format("[Macro System]: %s", tostring(msg)))
 end
 
+-- Forward Declarations
 local saveConfigToFile, loadConfigFromFile, loadMacroFromFile
 
-local lastAppliedSpeed = 1
-local function setGameSpeed(speed, force)
-    if not force and lastAppliedSpeed == speed then return end
-    local changeSpeedRemote = getFunctionRemote("ChangeSpeed")
+-- ==========================================
+-- HELPER FUNCTIONS (CASH CHECKER, POS, & SPEED)
+-- ==========================================
+local function setGameSpeed(speed)
+    local functionsFolder = ReplicatedStorage:FindFirstChild("Functions") or ReplicatedStorage:FindFirstChild("Remotes")
+    local changeSpeedRemote = functionsFolder and functionsFolder:FindFirstChild("ChangeSpeed")
     if changeSpeedRemote then
         pcall(function()
-            changeSpeedRemote:InvokeServer(speed)
-            lastAppliedSpeed = speed
+            if changeSpeedRemote:IsA("RemoteFunction") then
+                changeSpeedRemote:InvokeServer(speed)
+            elseif changeSpeedRemote:IsA("RemoteEvent") then
+                changeSpeedRemote:FireServer(speed)
+            end
         end)
     end
 end
@@ -74,26 +66,62 @@ end
 local function findTowerByPosition(targetCFrame)
     if not targetCFrame then return nil end
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
-    local targetPos = targetCFrame.Position
+    if not towersFolder then return nil end
+
     local closestTower = nil
-    local shortestDistanceSq = 16
+    local shortestDistance = 4
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
         if tower:IsA("Model") then
             local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
             if primaryPart then
-                local distSq = (primaryPart.Position - targetPos).SqMagnitude
-                if distSq < shortestDistanceSq then
-                    shortestDistanceSq = distSq
+                local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
+                if dist < shortestDistance then
+                    shortestDistance = dist
                     closestTower = tower
                 end
             end
         end
     end
+
     return closestTower
 end
 
+local function getEventRemote(nameList)
+    local possibleFolders = {
+        ReplicatedStorage:FindFirstChild("Events"),
+        ReplicatedStorage:FindFirstChild("Remotes"),
+        ReplicatedStorage:FindFirstChild("Functions"),
+        ReplicatedStorage
+    }
+    
+    for _, folder in ipairs(possibleFolders) do
+        if folder then
+            for _, name in ipairs(nameList) do
+                local remote = folder:FindFirstChild(name, true)
+                if remote then return remote end
+            end
+        end
+    end
+    return nil
+end
+
+local function safeFireRemote(remote, ...)
+    if not remote then return false end
+    local args = {...}
+    local success = pcall(function()
+        if remote:IsA("RemoteEvent") then
+            remote:FireServer(unpack(args))
+        elseif remote:IsA("RemoteFunction") then
+            remote:InvokeServer(unpack(args))
+        end
+    end)
+    return success
+end
+
+-- ==========================================
 -- UI CREATION
+-- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "TowerMacroUI_Advanced"
 ScreenGui.ResetOnSpawn = false
@@ -101,8 +129,9 @@ ScreenGui.ResetOnSpawn = false
 local playerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
 if not playerGui then return end
 
-local oldUI = playerGui:FindFirstChild("TowerMacroUI_Advanced")
-if oldUI then oldUI:Destroy() end
+if playerGui:FindFirstChild("TowerMacroUI_Advanced") then
+    playerGui.TowerMacroUI_Advanced:Destroy()
+end
 ScreenGui.Parent = playerGui
 
 local MainFrame = Instance.new("Frame")
@@ -114,14 +143,21 @@ MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.ClipsDescendants = true
 MainFrame.Parent = ScreenGui
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
 
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = MainFrame
+
+-- Top Bar Frame
 local TopBar = Instance.new("Frame")
 TopBar.Size = UDim2.new(1, 0, 0, 30)
 TopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 TopBar.BorderSizePixel = 0
 TopBar.Parent = MainFrame
-Instance.new("UICorner", TopBar).CornerRadius = UDim.new(0, 8)
+
+local TopBarCorner = Instance.new("UICorner")
+TopBarCorner.CornerRadius = UDim.new(0, 8)
+TopBarCorner.Parent = TopBar
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -60, 1, 0)
@@ -134,6 +170,7 @@ Title.Font = Enum.Font.SourceSansBold
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Parent = TopBar
 
+-- Minimize Button
 local MinimizeBtn = Instance.new("TextButton")
 MinimizeBtn.Size = UDim2.new(0, 24, 0, 24)
 MinimizeBtn.Position = UDim2.new(1, -52, 0, 3)
@@ -145,6 +182,7 @@ MinimizeBtn.TextSize = 16
 MinimizeBtn.Parent = TopBar
 Instance.new("UICorner", MinimizeBtn).CornerRadius = UDim.new(0, 4)
 
+-- Close Button
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 24, 0, 24)
 CloseBtn.Position = UDim2.new(1, -27, 0, 3)
@@ -156,12 +194,14 @@ CloseBtn.TextSize = 13
 CloseBtn.Parent = TopBar
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
+-- Container
 local ContentFrame = Instance.new("Frame")
 ContentFrame.Size = UDim2.new(1, 0, 1, -30)
 ContentFrame.Position = UDim2.new(0, 0, 0, 30)
 ContentFrame.BackgroundTransparency = 1
 ContentFrame.Parent = MainFrame
 
+-- Record Button
 local RecordBtn = Instance.new("TextButton")
 RecordBtn.Size = UDim2.new(0.9, 0, 0, 30)
 RecordBtn.Position = UDim2.new(0.05, 0, 0, 5)
@@ -173,6 +213,7 @@ RecordBtn.TextSize = 14
 RecordBtn.Parent = ContentFrame
 Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 4)
 
+-- Play Button
 local PlayBtn = Instance.new("TextButton")
 PlayBtn.Size = UDim2.new(0.9, 0, 0, 30)
 PlayBtn.Position = UDim2.new(0.05, 0, 0, 40)
@@ -184,6 +225,7 @@ PlayBtn.TextSize = 14
 PlayBtn.Parent = ContentFrame
 Instance.new("UICorner", PlayBtn).CornerRadius = UDim.new(0, 4)
 
+-- Save Input Box
 local SaveNameBox = Instance.new("TextBox")
 SaveNameBox.Size = UDim2.new(0.6, 0, 0, 30)
 SaveNameBox.Position = UDim2.new(0.05, 0, 0, 75)
@@ -195,6 +237,7 @@ SaveNameBox.TextSize = 13
 SaveNameBox.Parent = ContentFrame
 Instance.new("UICorner", SaveNameBox).CornerRadius = UDim.new(0, 4)
 
+-- Save Button
 local SaveBtn = Instance.new("TextButton")
 SaveBtn.Size = UDim2.new(0.28, 0, 0, 30)
 SaveBtn.Position = UDim2.new(0.67, 0, 0, 75)
@@ -206,6 +249,7 @@ SaveBtn.TextSize = 14
 SaveBtn.Parent = ContentFrame
 Instance.new("UICorner", SaveBtn).CornerRadius = UDim.new(0, 4)
 
+-- Selected Macro Label
 local SelectLabel = Instance.new("TextLabel")
 SelectLabel.Size = UDim2.new(0.9, 0, 0, 25)
 SelectLabel.Position = UDim2.new(0.05, 0, 0, 110)
@@ -217,6 +261,7 @@ SelectLabel.TextSize = 12
 SelectLabel.Parent = ContentFrame
 Instance.new("UICorner", SelectLabel).CornerRadius = UDim.new(0, 4)
 
+-- Refresh List Button
 local RefreshBtn = Instance.new("TextButton")
 RefreshBtn.Size = UDim2.new(0.9, 0, 0, 25)
 RefreshBtn.Position = UDim2.new(0.05, 0, 0, 140)
@@ -228,6 +273,7 @@ RefreshBtn.TextSize = 13
 RefreshBtn.Parent = ContentFrame
 Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0, 4)
 
+-- Auto Play Toggle Button
 local AutoPlayBtn = Instance.new("TextButton")
 AutoPlayBtn.Size = UDim2.new(0.9, 0, 0, 30)
 AutoPlayBtn.Position = UDim2.new(0.05, 0, 0, 170)
@@ -239,17 +285,19 @@ AutoPlayBtn.TextSize = 13
 AutoPlayBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoPlayBtn).CornerRadius = UDim.new(0, 4)
 
+-- Speed Toggle Button (1x / 2x / 5x)
 local SpeedBtn = Instance.new("TextButton")
 SpeedBtn.Size = UDim2.new(0.9, 0, 0, 30)
 SpeedBtn.Position = UDim2.new(0.05, 0, 0, 205)
 SpeedBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
-SpeedBtn.Text = "Speed: 1x"
+SpeedBtn.Text = "Speed: 1x (OFF)"
 SpeedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 SpeedBtn.Font = Enum.Font.SourceSansBold
 SpeedBtn.TextSize = 13
 SpeedBtn.Parent = ContentFrame
 Instance.new("UICorner", SpeedBtn).CornerRadius = UDim.new(0, 4)
 
+-- Map Input Box
 local MapNameBox = Instance.new("TextBox")
 MapNameBox.Size = UDim2.new(0.6, 0, 0, 30)
 MapNameBox.Position = UDim2.new(0.05, 0, 0, 240)
@@ -261,6 +309,7 @@ MapNameBox.TextSize = 13
 MapNameBox.Parent = ContentFrame
 Instance.new("UICorner", MapNameBox).CornerRadius = UDim.new(0, 4)
 
+-- Auto Vote Map Toggle Button
 local AutoVoteBtn = Instance.new("TextButton")
 AutoVoteBtn.Size = UDim2.new(0.28, 0, 0, 30)
 AutoVoteBtn.Position = UDim2.new(0.67, 0, 0, 240)
@@ -272,6 +321,7 @@ AutoVoteBtn.TextSize = 11
 AutoVoteBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoVoteBtn).CornerRadius = UDim.new(0, 4)
 
+-- Difficulty Input Box
 local DiffNameBox = Instance.new("TextBox")
 DiffNameBox.Size = UDim2.new(0.6, 0, 0, 30)
 DiffNameBox.Position = UDim2.new(0.05, 0, 0, 275)
@@ -283,6 +333,7 @@ DiffNameBox.TextSize = 13
 DiffNameBox.Parent = ContentFrame
 Instance.new("UICorner", DiffNameBox).CornerRadius = UDim.new(0, 4)
 
+-- Auto Vote Difficulty Toggle Button
 local AutoVoteDiffBtn = Instance.new("TextButton")
 AutoVoteDiffBtn.Size = UDim2.new(0.28, 0, 0, 30)
 AutoVoteDiffBtn.Position = UDim2.new(0.67, 0, 0, 275)
@@ -294,6 +345,7 @@ AutoVoteDiffBtn.TextSize = 11
 AutoVoteDiffBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoVoteDiffBtn).CornerRadius = UDim.new(0, 4)
 
+-- Auto Summon Toggle Button
 local AutoSummonBtn = Instance.new("TextButton")
 AutoSummonBtn.Size = UDim2.new(0.9, 0, 0, 30)
 AutoSummonBtn.Position = UDim2.new(0.05, 0, 0, 310)
@@ -305,6 +357,7 @@ AutoSummonBtn.TextSize = 13
 AutoSummonBtn.Parent = ContentFrame
 Instance.new("UICorner", AutoSummonBtn).CornerRadius = UDim.new(0, 4)
 
+-- Detailed Status Info Label
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(0.9, 0, 0, 135)
 StatusLabel.Position = UDim2.new(0.05, 0, 0, 345)
@@ -318,26 +371,49 @@ StatusLabel.TextYAlignment = Enum.TextYAlignment.Top
 StatusLabel.Parent = ContentFrame
 Instance.new("UICorner", StatusLabel).CornerRadius = UDim.new(0, 4)
 
+-- UI Events
 local isMinimized = false
 MinimizeBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
-    MainFrame.Size = isMinimized and UDim2.new(0, 240, 0, 30) or UDim2.new(0, 240, 0, 520)
-    ContentFrame.Visible = not isMinimized
-    MinimizeBtn.Text = isMinimized and "+" or "-"
+    if isMinimized then
+        MainFrame.Size = UDim2.new(0, 240, 0, 30)
+        ContentFrame.Visible = false
+        MinimizeBtn.Text = "+"
+    else
+        MainFrame.Size = UDim2.new(0, 240, 0, 520)
+        ContentFrame.Visible = true
+        MinimizeBtn.Text = "-"
+    end
 end)
 
 CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- SAVE & LOAD SYSTEM
+-- ==========================================
+-- SAVE & LOAD CONFIG / MACRO SYSTEM
+-- ==========================================
+local function updateSpeedUI()
+    if gameSpeedSetting == 2 then
+        SpeedBtn.Text = "Speed: 2x"
+        SpeedBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 40)
+    elseif gameSpeedSetting == 5 then
+        SpeedBtn.Text = "Speed: 5x"
+        SpeedBtn.BackgroundColor3 = Color3.fromRGB(140, 40, 180)
+    else
+        gameSpeedSetting = 1
+        SpeedBtn.Text = "Speed: 1x (OFF)"
+        SpeedBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+    end
+end
+
 saveConfigToFile = function()
     if not supportsFileSystem then return end
     local configData = {
         autoPlay = isAutoPlayEnabled,
         autoVote = isAutoVoteEnabled,
         autoVoteDiff = isAutoVoteDiffEnabled,
-        speedMultiplier = currentSpeedMultiplier,
+        gameSpeed = gameSpeedSetting,
         autoSummon = isAutoSummonEnabled,
         mapName = MapNameBox.Text,
         diffName = DiffNameBox.Text,
@@ -359,26 +435,33 @@ loadConfigFromFile = function()
             AutoPlayBtn.Text = isAutoPlayEnabled and "Auto Play: ON" or "Auto Play: OFF"
             AutoPlayBtn.BackgroundColor3 = isAutoPlayEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
+
         if result.autoVote ~= nil then
             isAutoVoteEnabled = result.autoVote
             AutoVoteBtn.Text = isAutoVoteEnabled and "Vote ON" or "Vote OFF"
             AutoVoteBtn.BackgroundColor3 = isAutoVoteEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
+
         if result.autoVoteDiff ~= nil then
             isAutoVoteDiffEnabled = result.autoVoteDiff
             AutoVoteDiffBtn.Text = isAutoVoteDiffEnabled and "Diff ON" or "Diff OFF"
             AutoVoteDiffBtn.BackgroundColor3 = isAutoVoteDiffEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
-        if result.speedMultiplier ~= nil then
-            currentSpeedMultiplier = result.speedMultiplier
-            SpeedBtn.Text = "Speed: " .. currentSpeedMultiplier .. "x"
-            SpeedBtn.BackgroundColor3 = (currentSpeedMultiplier > 1) and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+
+        if result.gameSpeed ~= nil then
+            gameSpeedSetting = result.gameSpeed
+            updateSpeedUI()
+        elseif result.auto2xSpeed ~= nil then
+            gameSpeedSetting = result.auto2xSpeed and 2 or 1
+            updateSpeedUI()
         end
+
         if result.autoSummon ~= nil then
             isAutoSummonEnabled = result.autoSummon
             AutoSummonBtn.Text = isAutoSummonEnabled and "Auto Summon (10x): ON" or "Auto Summon (10x): OFF"
             AutoSummonBtn.BackgroundColor3 = isAutoSummonEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
         end
+
         if result.mapName then MapNameBox.Text = result.mapName end
         if result.diffName then DiffNameBox.Text = result.diffName end
         if result.saveInputText then SaveNameBox.Text = result.saveInputText end
@@ -391,6 +474,7 @@ local function deserializeCFrame(tbl) return CFrame.new(unpack(tbl)) end
 
 local function saveMacroToFile(fileName)
     if not supportsFileSystem or #recordedActions == 0 then return end
+
     local serializedData = {}
     for _, action in ipairs(recordedActions) do
         local copyAction = {
@@ -420,10 +504,8 @@ loadMacroFromFile = function(fileName)
     local path = FOLDER_NAME .. "/" .. fileName .. ".json"
     if not isfile(path) then return false end
 
-    local success, decoded = pcall(function()
-        return HttpService:JSONDecode(readfile(path))
-    end)
-    if not success or not decoded then return false end
+    local rawJson = readfile(path)
+    local decoded = HttpService:JSONDecode(rawJson)
 
     recordedActions = {}
     for _, action in ipairs(decoded) do
@@ -447,27 +529,30 @@ loadMacroFromFile = function(fileName)
     return true
 end
 
--- HOOK RECORDING SYSTEM
+-- ==========================================
+-- HOOK RECORDING SYSTEM (SMART MATCHING)
+-- ==========================================
 local function getTowerIndexFromRecord(towerInstance)
     if not towerInstance then return nil end
     for index, instance in pairs(placedTowersRecord) do
-        if instance == towerInstance then return index end
+        if instance == towerInstance then
+            return index
+        end
     end
     return nil
 end
 
 local rawNamecall
 rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-    if checkcaller and checkcaller() then
-        return rawNamecall(self, ...)
-    end
-
     local method = getnamecallmethod()
+    local args = {...}
+
     if isRecording and (method == "InvokeServer" or method == "invokeServer") then
-        local args = {...}
+        local currentTime = tick() - recordStartTime
 
         if self.Name == "SpawnTower" then
             local result = rawNamecall(self, ...)
+            
             local spawnedTower = nil
             if typeof(result) == "Instance" then
                 spawnedTower = result
@@ -481,24 +566,21 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
 
             if not spawnedTower and (result == false or result == nil) then
-                logConsole("[REC WARN] SpawnTower gagal.")
+                logConsole("[REC WARN] SpawnTower gagal (Uang kurang / invalid). Aksi diabaikan.")
                 return result
             end
 
             table.insert(placedTowersRecord, spawnedTower)
             local towerIndex = #placedTowersRecord
 
-            local recordedTime
             if #recordedActions == 0 then
                 recordStartTime = tick()
-                recordedTime = 0
-            else
-                recordedTime = (tick() - recordStartTime) * currentSpeedMultiplier
+                currentTime = 0
             end
 
             table.insert(recordedActions, {
                 actionType = "Place",
-                time = recordedTime,
+                time = currentTime,
                 towerIndex = towerIndex,
                 towerName = args[1],
                 cframe = args[2],
@@ -507,31 +589,33 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 arg5 = args[5]
             })
 
-            logConsole(string.format("[REC] Place Tower #%d: %s pada waktu %.2fs", towerIndex, tostring(args[1]), recordedTime))
+            logConsole(string.format("[REC] Place Tower #%d: %s", towerIndex, tostring(args[1])))
             StatusLabel.Text = string.format("Status: Recording...\n[Aksi %d] Place: %s (ID: #%d)", #recordedActions, tostring(args[1]), towerIndex)
+
             return result
 
         elseif self.Name == "UpgradeTower" then
             local targetTower = args[1]
             local towerName = args[2]
+
             local towerIndex = getTowerIndexFromRecord(targetTower)
 
             if not towerIndex and targetTower then
-                local targetPos
+                local targetPos = nil
                 if typeof(targetTower) == "Instance" then
                     local primaryPart = targetTower.PrimaryPart or targetTower:FindFirstChildWhichIsA("BasePart")
                     if primaryPart then targetPos = primaryPart.Position end
                 end
 
                 if targetPos then
-                    local shortestDistanceSq = 64
+                    local shortestDistance = 8
                     for idx, recTower in pairs(placedTowersRecord) do
                         if recTower and recTower:IsDescendantOf(Workspace) then
                             local recPart = recTower.PrimaryPart or recTower:FindFirstChildWhichIsA("BasePart")
                             if recPart then
-                                local distSq = (recPart.Position - targetPos).SqMagnitude
-                                if distSq < shortestDistanceSq then
-                                    shortestDistanceSq = distSq
+                                local dist = (recPart.Position - targetPos).Magnitude
+                                if dist < shortestDistance then
+                                    shortestDistance = dist
                                     towerIndex = idx
                                 end
                             end
@@ -545,38 +629,49 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
 
             if towerIndex then
-                local recordedTime = (tick() - recordStartTime) * currentSpeedMultiplier
                 local extraArgs = {}
-                for i = 2, #args do table.insert(extraArgs, args[i]) end
+                for i = 2, #args do
+                    table.insert(extraArgs, args[i])
+                end
 
                 table.insert(recordedActions, {
                     actionType = "Upgrade",
-                    time = recordedTime,
+                    time = currentTime,
                     towerIndex = towerIndex,
                     towerName = towerName,
                     extraArgs = extraArgs
                 })
 
-                logConsole(string.format("[REC] Upgrade Tower #%d pada waktu %.2fs", towerIndex, recordedTime))
+                logConsole(string.format("[REC] Upgrade Tower #%d: %s", towerIndex, tostring(towerName)))
                 StatusLabel.Text = string.format("Status: Recording...\n[Aksi %d] Upgrade Tower #%d", #recordedActions, towerIndex)
+            else
+                logConsole("[REC WARN] Upgrade gagal direkam: Tidak ada tower yang terdaftar.")
             end
         end
     end
+
     return rawNamecall(self, ...)
 end)
 
--- PLAYBACK ENGINE
+-- ==========================================
+-- PLAYBACK ENGINE (UPGRADE RETRY & POSITION FIX)
+-- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
 
-    local spawnRemote = getFunctionRemote("SpawnTower")
-    local upgradeRemote = getFunctionRemote("UpgradeTower")
+    local functionsFolder = ReplicatedStorage:FindFirstChild("Functions") or ReplicatedStorage:FindFirstChild("Remotes")
+    local spawnRemote = functionsFolder and functionsFolder:FindFirstChild("SpawnTower")
+    local upgradeRemote = functionsFolder and functionsFolder:FindFirstChild("UpgradeTower")
+
     if not spawnRemote or not upgradeRemote then
         StatusLabel.Text = "Status: Remote Error\nGame belum siap!"
         return
     end
 
-    setGameSpeed(currentSpeedMultiplier, true)
+    if gameSpeedSetting > 1 then
+        setGameSpeed(gameSpeedSetting)
+    end
+
     isPlaying = true
     placedTowersPlay = {}
     logConsole("--- Memulai Playback Macro ---")
@@ -587,25 +682,30 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            local targetTime = action.time / currentSpeedMultiplier
+            local currentMultiplier = gameSpeedSetting
+            local targetTime = action.time / currentMultiplier
             local timeToWait = targetTime - (tick() - playStartTime)
 
             while timeToWait > 0 and isPlaying do
-                targetTime = action.time / currentSpeedMultiplier
+                currentMultiplier = gameSpeedSetting
+                targetTime = action.time / currentMultiplier
                 timeToWait = targetTime - (tick() - playStartTime)
-                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, math.max(0, timeToWait))
-                task.wait(math.min(timeToWait, 0.05))
+
+                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentMultiplier, index, #recordedActions, action.actionType, timeToWait)
+                task.wait(math.min(timeToWait, 0.1))
             end
 
             if not isPlaying then break end
 
             if action.actionType == "Place" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
+
                 local newTowerInstance = nil
                 local maxAttempts = 10
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
+
                     local result = spawnRemote:InvokeServer(
                         action.towerName,
                         action.cframe,
@@ -621,39 +721,51 @@ local function playMacro()
                     end
 
                     if not newTowerInstance and action.cframe then
-                        task.wait(0.1)
+                        task.wait(0.2)
                         newTowerInstance = findTowerByPosition(action.cframe)
                     end
 
                     if newTowerInstance then
                         placedTowersPlay[action.towerIndex] = newTowerInstance
-                        logConsole(string.format("[PLAY %d/%d] Placed Tower #%d", index, #recordedActions, action.towerIndex))
+                        logConsole(string.format("[PLAY %d/%d] Placed Tower #%d: %s", index, #recordedActions, action.towerIndex, tostring(newTowerInstance)))
                         break
                     else
                         StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(0.5)
+                        task.wait(1)
                     end
+                end
+
+                if not newTowerInstance then
+                    logConsole(string.format("[PLAY ERROR] Gagal Place Tower #%d setelah %d percobaan!", action.towerIndex, maxAttempts))
                 end
 
             elseif action.actionType == "Upgrade" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
+
                 local targetTower = placedTowersPlay[action.towerIndex]
 
                 if not targetTower or not targetTower:IsDescendantOf(Workspace) then
+                    local correspondingPlaceAction = nil
                     for _, act in ipairs(recordedActions) do
                         if act.actionType == "Place" and act.towerIndex == action.towerIndex then
-                            if act.cframe then
-                                targetTower = findTowerByPosition(act.cframe)
-                                placedTowersPlay[action.towerIndex] = targetTower
-                            end
+                            correspondingPlaceAction = act
                             break
                         end
+                    end
+
+                    if correspondingPlaceAction and correspondingPlaceAction.cframe then
+                        targetTower = findTowerByPosition(correspondingPlaceAction.cframe)
+                        placedTowersPlay[action.towerIndex] = targetTower
                     end
                 end
 
                 if targetTower then
-                    for attempt = 1, 15 do
+                    local successUpgrade = false
+                    local maxAttempts = 15
+
+                    for attempt = 1, maxAttempts do
                         if not isPlaying then break end
+                        
                         local res
                         if action.extraArgs and #action.extraArgs > 0 then
                             res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
@@ -662,12 +774,20 @@ local function playMacro()
                         end
                         
                         if res ~= false then
-                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d", index, #recordedActions, action.towerIndex))
+                            successUpgrade = true
+                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
                             break
                         else
-                            task.wait(0.5)
+                            StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                            task.wait(1)
                         end
                     end
+
+                    if not successUpgrade then
+                        logConsole(string.format("[PLAY WARN] Upgrade Tower #%d Gagal setelah %d Percobaan!", action.towerIndex, maxAttempts))
+                    end
+                else
+                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
                 end
             end
         end
@@ -678,7 +798,9 @@ local function playMacro()
     end)
 end
 
+-- ==========================================
 -- BUTTON EVENTS
+-- ==========================================
 RecordBtn.MouseButton1Click:Connect(function()
     if isPlaying then return end
     if not isRecording then
@@ -729,18 +851,16 @@ AutoPlayBtn.MouseButton1Click:Connect(function()
 end)
 
 SpeedBtn.MouseButton1Click:Connect(function()
-    if currentSpeedMultiplier == 1 then
-        currentSpeedMultiplier = 2
-    elseif currentSpeedMultiplier == 2 then
-        currentSpeedMultiplier = 5
+    if gameSpeedSetting == 1 then
+        gameSpeedSetting = 2
+    elseif gameSpeedSetting == 2 then
+        gameSpeedSetting = 5
     else
-        currentSpeedMultiplier = 1
+        gameSpeedSetting = 1
     end
     
-    SpeedBtn.Text = "Speed: " .. currentSpeedMultiplier .. "x"
-    SpeedBtn.BackgroundColor3 = (currentSpeedMultiplier > 1) and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
-    
-    setGameSpeed(currentSpeedMultiplier, true)
+    updateSpeedUI()
+    setGameSpeed(gameSpeedSetting)
     saveConfigToFile()
 end)
 
@@ -767,25 +887,28 @@ end)
 
 loadConfigFromFile()
 
+-- ==========================================
+-- SMART AUTO VOTE MAP FUNCTION
+-- ==========================================
 local function executeMapVote()
     local mapInput = MapNameBox.Text
-    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap"})
-    if not voteMapRemote then return end
+    local voteMapRemote = getEventRemote({"VoteForMap", "VoteMap", "MapVote", "Vote_Map"})
+    if not voteMapRemote then 
+        logConsole("[VOTE ERROR] Remote Map Vote tidak ditemukan!")
+        return 
+    end
 
-    local targetChoice = nil
-    local numInput = tonumber(mapInput)
+    local targetChoice = tonumber(mapInput)
 
-    if numInput then
-        targetChoice = numInput
-    else
+    if not targetChoice then
         pcall(function()
             for _, gui in ipairs(playerGui:GetChildren()) do
-                if gui:IsA("ScreenGui") and (string.find(string.lower(gui.Name), "vote") or string.find(string.lower(gui.Name), "map")) then
+                if gui:IsA("ScreenGui") and gui.Enabled then
                     for _, desc in ipairs(gui:GetDescendants()) do
                         if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and string.find(string.lower(desc.Text), string.lower(mapInput)) then
                             local slotNum = desc.Name:match("%d+") or (desc.Parent and desc.Parent.Name:match("%d+"))
                             if slotNum then
-                                targetChoice = tonumber(slotNum) or slotNum
+                                targetChoice = tonumber(slotNum)
                                 break
                             end
                         end
@@ -795,30 +918,38 @@ local function executeMapVote()
         end)
     end
 
-    pcall(function()
-        if targetChoice then
-            voteMapRemote:FireServer(targetChoice)
-        else
-            voteMapRemote:FireServer(mapInput)
-        end
-    end)
+    local payload = targetChoice or mapInput
+    safeFireRemote(voteMapRemote, payload)
+    logConsole("Auto Vote Map dikirim: " .. tostring(payload))
 end
 
+-- ==========================================
+-- AUTO SUMMON LOOP
+-- ==========================================
 task.spawn(function()
     while true do
         task.wait(2)
         if isAutoSummonEnabled then
             pcall(function()
-                local summonFolder = remotesCache.remotes and remotesCache.remotes:FindFirstChild("Summon")
-                local summonRemote = summonFolder and summonFolder:FindFirstChild("Summon")
-                if summonRemote then summonRemote:InvokeServer(10) end
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage:FindFirstChild("Functions")
+                local summonFolder = remotes and remotes:FindFirstChild("Summon")
+                local summonRemote = (summonFolder and summonFolder:FindFirstChild("Summon")) or (remotes and remotes:FindFirstChild("Summon"))
+
+                if summonRemote then
+                    safeFireRemote(summonRemote, 10)
+                    logConsole("Auto Summon (10x) dieksekusi")
+                end
             end)
         end
     end
 end)
 
+-- ==========================================
+-- AUTO PLAY & VOTE LOOP
+-- ==========================================
 local function isMatchActuallyStarted()
-    local spawnRemote = getFunctionRemote("SpawnTower")
+    local functionsFolder = ReplicatedStorage:FindFirstChild("Functions") or ReplicatedStorage:FindFirstChild("Remotes")
+    local spawnRemote = functionsFolder and functionsFolder:FindFirstChild("SpawnTower")
     local mapFolder = Workspace:FindFirstChild("Map") or Workspace:FindFirstChild("Board")
     return (spawnRemote ~= nil and mapFolder ~= nil)
 end
@@ -828,37 +959,42 @@ task.spawn(function()
         task.wait(1)
 
         if (isAutoVoteEnabled or isAutoVoteDiffEnabled) and not hasVotedThisSession then
-            hasVotedThisSession = true
-            task.spawn(function()
-                if isAutoVoteEnabled then
-                    for attempt = 1, 3 do
-                        executeMapVote()
-                        task.wait(0.5)
-                    end
-                end
-
-                task.wait(3)
-
-                if isAutoVoteDiffEnabled then
-                    local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication"})
-                    if voteDiffRemote then
-                        for attempt = 1, 5 do
-                            pcall(function()
-                                voteDiffRemote:FireServer(DiffNameBox.Text)
-                            end)
+            if not isMatchActuallyStarted() then
+                hasVotedThisSession = true
+                task.spawn(function()
+                    if isAutoVoteEnabled then
+                        for attempt = 1, 3 do
+                            executeMapVote()
                             task.wait(0.8)
                         end
                     end
-                end
-            end)
+
+                    task.wait(2)
+
+                    if isAutoVoteDiffEnabled then
+                        local voteDiffRemote = getEventRemote({"VoteForComplication", "VoteComplication", "VoteDifficulty", "DifficultyVote"})
+                        if voteDiffRemote then
+                            local diffValue = tonumber(DiffNameBox.Text) or DiffNameBox.Text
+                            for attempt = 1, 4 do
+                                safeFireRemote(voteDiffRemote, diffValue)
+                                logConsole(string.format("Auto Vote Difficulty (%d/4) dikirim: %s", attempt, tostring(diffValue)))
+                                task.wait(0.8)
+                            end
+                        else
+                            logConsole("[VOTE ERROR] Remote Difficulty Vote tidak ditemukan!")
+                        end
+                    end
+                end)
+            end
         end
 
         if isMatchActuallyStarted() then
-            setGameSpeed(currentSpeedMultiplier)
+            if gameSpeedSetting > 1 then
+                setGameSpeed(gameSpeedSetting)
+            end
 
             if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
-                -- SPAWN BUFFER DITEMPATKAN DI 10 DETIK
                 for i = 10, 1, -1 do
                     StatusLabel.Text = string.format("Status: Match Detected!\nWaiting Spawn Buffer: %d s", i)
                     task.wait(1)
