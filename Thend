@@ -47,7 +47,7 @@ end
 local saveConfigToFile, loadConfigFromFile, loadMacroFromFile
 
 -- ==========================================
--- HELPER FUNCTIONS (CASH CHECKER, POS, & SPEED)
+-- HELPER FUNCTIONS (ENHANCED TOWER LOOKUP)
 -- ==========================================
 local function setGameSpeed(speed)
     local functionsFolder = ReplicatedStorage:FindFirstChild("Functions")
@@ -104,6 +104,17 @@ local function getEventRemote(nameList)
         if remote then return remote end
     end
     return nil
+end
+
+-- Helper untuk mengumpulkan daftar model tower yang sudah terdaftar di sesi Playback
+local function getPlacedTowersPlayList(excludeIndex)
+    local ignoreList = {}
+    for idx, towerModel in pairs(placedTowersPlay) do
+        if idx ~= excludeIndex and towerModel then
+            table.insert(ignoreList, towerModel)
+        end
+    end
+    return ignoreList
 end
 
 -- ==========================================
@@ -547,7 +558,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 local searchStart = tick()
                 repeat
                     task.wait(0.05)
-                    spawnedTower = findTowerByPosition(args[2], 6, placedTowersRecord)
+                    spawnedTower = findTowerByPosition(args[2], 8, placedTowersRecord)
                 until spawnedTower or (tick() - searchStart > 1.5)
             end
 
@@ -601,7 +612,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
 
                 if targetPos then
-                    local shortestDistance = 6
+                    local shortestDistance = 8
                     for idx, recTower in pairs(placedTowersRecord) do
                         if recTower and recTower:IsDescendantOf(Workspace) then
                             local recPart = recTower.PrimaryPart or recTower:FindFirstChildWhichIsA("BasePart")
@@ -649,7 +660,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (RELIABLE RETRY & INDEXING FIX)
+-- PLAYBACK ENGINE (STRICT TOWER ISOLATION)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -697,9 +708,11 @@ local function playMacro()
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
+                    local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+
                     -- Cek dulu apakah tower sudah ada di map dari attempt sebelumnya
                     if action.cframe then
-                        newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
+                        newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
                     end
 
                     if not newTowerInstance then
@@ -721,7 +734,7 @@ local function playMacro()
                             local searchStart = tick()
                             repeat
                                 task.wait(0.05)
-                                newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
+                                newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
                             until newTowerInstance or (tick() - searchStart > 1.5)
                         end
                     end
@@ -746,13 +759,12 @@ local function playMacro()
                 local successUpgrade = false
                 local maxAttempts = 200
 
-                -- Loop retry upgrade
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
-                    -- Selalu pastikan instance targetTower valid di tiap iterasi loop
                     local targetTower = placedTowersPlay[action.towerIndex]
 
+                    -- Jika tower belum terdaftar atau terhapus, cari berdasarkan posisi CFrame tempat dipasang
                     if not targetTower or not targetTower:IsDescendantOf(Workspace) then
                         local correspondingPlaceAction = nil
                         for _, act in ipairs(recordedActions) do
@@ -763,7 +775,11 @@ local function playMacro()
                         end
 
                         if correspondingPlaceAction and correspondingPlaceAction.cframe then
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 6)
+                            local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+                            -- Radius bertahap dari 8 hingga 15 studs
+                            local currentRadius = (attempt > 20) and 15 or 8
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
+                            
                             if targetTower then
                                 placedTowersPlay[action.towerIndex] = targetTower
                             end
@@ -778,6 +794,11 @@ local function playMacro()
                             res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                         end
                         
+                        -- Coba format remote fallback jika argumen pertama ditolak
+                        if res == false then
+                            res = upgradeRemote:InvokeServer(targetTower)
+                        end
+
                         if res ~= false then
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
