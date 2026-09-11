@@ -659,7 +659,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (AUTO SKIP MAX LEVEL)
+-- PLAYBACK ENGINE (WAIT FOR CASH FIXED)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -755,8 +755,7 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local successUpgrade = false
-                local maxAttempts = 30
-                local consecutiveFailures = 0
+                local maxAttempts = 300 -- Memberikan waktu hingga ~75 detik untuk mengumpulkan uang
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
@@ -784,6 +783,22 @@ local function playMacro()
                     end
 
                     if targetTower then
+                        -- Cek jika game memiliki atribut penanda MAX langsung pada model tower
+                        local isMaxLevel = false
+                        pcall(function()
+                            if targetTower:GetAttribute("Max") == true or targetTower:GetAttribute("IsMax") == true then
+                                isMaxLevel = true
+                            elseif targetTower:FindFirstChild("Max") or targetTower:FindFirstChild("IsMax") then
+                                isMaxLevel = true
+                            end
+                        end)
+
+                        if isMaxLevel then
+                            logConsole(string.format("[PLAY MAX DETECTED] Tower #%d sudah MAX. Menyeberang ke aksi berikutnya.", action.towerIndex))
+                            successUpgrade = true
+                            break
+                        end
+
                         local res
                         if action.extraArgs and #action.extraArgs > 0 then
                             res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
@@ -799,23 +814,15 @@ local function playMacro()
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                             break
-                        else
-                            consecutiveFailures = consecutiveFailures + 1
-                            -- Jika ditolak 5x berturut-turut, anggap unit sudah MAX dan langsung paksakan lanjut ke aksi berikutnya
-                            if consecutiveFailures >= 5 then
-                                logConsole(string.format("[PLAY MAX DETECTED] Tower #%d menolak upgrade 5x (Sudah MAX). Skip ke aksi berikutnya!", action.towerIndex))
-                                successUpgrade = true
-                                break
-                            end
                         end
                     end
 
-                    StatusLabel.Text = string.format("Status: Waiting Cash/Tower for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                    StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nAttempt (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
                     task.wait(0.25)
                 end
 
                 if not successUpgrade then
-                    logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati. Melanjutkan ke aksi berikutnya...", action.towerIndex))
+                    logConsole(string.format("[PLAY TIMEOUT] Upgrade Tower #%d dilewati setelah batas waktu habis.", action.towerIndex))
                 end
             end
         end
