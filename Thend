@@ -4,7 +4,7 @@ local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- Check Executor File System Support (Termasuk delfile & isfile)
+-- Check Executor File System Support
 local supportsFileSystem = (writefile and readfile and isfolder and makefolder and listfiles and delfile and isfile)
 if not supportsFileSystem then
     warn("[Macro System]: Executor kamu tidak mendukung File System lengkap (writefile/readfile/delfile)!")
@@ -59,24 +59,36 @@ local function setGameSpeed(speed)
     end
 end
 
-local function findTowerByPosition(targetCFrame, maxDist)
+-- Ditingkatkan: Menambahkan parameter ignoreTable agar tidak salah mendeteksi unit lama
+local function findTowerByPosition(targetCFrame, maxDist, ignoreTable)
     if not targetCFrame then return nil end
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
-    maxDist = maxDist or 15
+    maxDist = maxDist or 6 -- Radius diperketat ke 6 studs
+    ignoreTable = ignoreTable or {}
 
     local closestTower = nil
     local shortestDistance = maxDist
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
         if tower:IsA("Model") then
-            local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
-            if primaryPart then
-                local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closestTower = tower
+            local isIgnored = false
+            for _, ignoredTower in pairs(ignoreTable) do
+                if ignoredTower == tower then
+                    isIgnored = true
+                    break
+                end
+            end
+
+            if not isIgnored then
+                local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
+                if primaryPart then
+                    local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
+                    if dist < shortestDistance then
+                        shortestDistance = dist
+                        closestTower = tower
+                    end
                 end
             end
         end
@@ -534,7 +546,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 
             if not spawnedTower and args[2] then
                 task.wait(0.1)
-                spawnedTower = findTowerByPosition(args[2])
+                spawnedTower = findTowerByPosition(args[2], 6, placedTowersRecord)
             end
 
             if not spawnedTower and (result == false or result == nil) then
@@ -580,7 +592,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
 
                 if targetPos then
-                    local shortestDistance = 15
+                    local shortestDistance = 6
                     for idx, recTower in pairs(placedTowersRecord) do
                         if recTower and recTower:IsDescendantOf(Workspace) then
                             local recPart = recTower.PrimaryPart or recTower:FindFirstChildWhichIsA("BasePart")
@@ -626,7 +638,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (OPTIMIZED FIX FOR TIMEOUT & CASH)
+-- PLAYBACK ENGINE (FIX DUPLICATE DETECTION)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -669,7 +681,7 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local newTowerInstance = nil
-                local maxAttempts = 600 -- Diperpanjang hingga 2 menit tunggu per unit
+                local maxAttempts = 600
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
@@ -682,18 +694,22 @@ local function playMacro()
                         action.arg5
                     )
 
-                    if typeof(result) == "Instance" then
-                        newTowerInstance = result
-                    elseif typeof(result) == "table" and result[1] then
-                        newTowerInstance = result[1]
-                    end
+                    -- Hanya cari tower baru jika panggilan remote TIDAK mengembalikan false (uang cukup)
+                    if result ~= false then
+                        if typeof(result) == "Instance" then
+                            newTowerInstance = result
+                        elseif typeof(result) == "table" and result[1] then
+                            newTowerInstance = result[1]
+                        end
 
-                    if not newTowerInstance and action.cframe then
-                        local searchStart = tick()
-                        repeat
-                            task.wait(0.05)
-                            newTowerInstance = findTowerByPosition(action.cframe, 15)
-                        until newTowerInstance or (tick() - searchStart > 0.4)
+                        if not newTowerInstance and action.cframe then
+                            local searchStart = tick()
+                            repeat
+                                task.wait(0.05)
+                                -- Mengabaikan tower yang sudah terpasang di placedTowersPlay
+                                newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
+                            until newTowerInstance or (tick() - searchStart > 0.3)
+                        end
                     end
 
                     if newTowerInstance then
@@ -727,7 +743,7 @@ local function playMacro()
                     if correspondingPlaceAction and correspondingPlaceAction.cframe then
                         local searchStart = tick()
                         repeat
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 15)
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 6)
                             if not targetTower then task.wait(0.05) end
                         until targetTower or (tick() - searchStart > 0.5)
 
@@ -747,7 +763,7 @@ local function playMacro()
                         if not targetTower:IsDescendantOf(Workspace) then
                             for _, act in ipairs(recordedActions) do
                                 if act.actionType == "Place" and act.towerIndex == action.towerIndex and act.cframe then
-                                    targetTower = findTowerByPosition(act.cframe, 15)
+                                    targetTower = findTowerByPosition(act.cframe, 6)
                                     placedTowersPlay[action.towerIndex] = targetTower
                                     break
                                 end
@@ -833,7 +849,6 @@ RefreshBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- EVENT HAPUS FILE MACRO
 DeleteBtn.MouseButton1Click:Connect(function()
     if not supportsFileSystem then
         StatusLabel.Text = "Status: Executor tidak mendukung FileSystem!"
