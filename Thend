@@ -106,7 +106,6 @@ local function getEventRemote(nameList)
     return nil
 end
 
--- Helper untuk mengumpulkan daftar model tower yang sudah terdaftar di sesi Playback
 local function getPlacedTowersPlayList(excludeIndex)
     local ignoreList = {}
     for idx, towerModel in pairs(placedTowersPlay) do
@@ -595,7 +594,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             local result = rawNamecall(self, ...)
 
             if result == false then
-                logConsole("[REC WARN] Upgrade ditolak server. Aksi diabaikan.")
+                logConsole("[REC WARN] Upgrade ditolak server (Uang kurang/Max). Aksi diabaikan.")
                 return result
             end
 
@@ -660,7 +659,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (STRICT TOWER ISOLATION)
+-- PLAYBACK ENGINE (AUTO SKIP MAX LEVEL)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -710,7 +709,6 @@ local function playMacro()
 
                     local ignoreList = getPlacedTowersPlayList(action.towerIndex)
 
-                    -- Cek dulu apakah tower sudah ada di map dari attempt sebelumnya
                     if action.cframe then
                         newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
                     end
@@ -757,14 +755,14 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local successUpgrade = false
-                local maxAttempts = 200
+                local maxAttempts = 30
+                local consecutiveFailures = 0
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
                     local targetTower = placedTowersPlay[action.towerIndex]
 
-                    -- Jika tower belum terdaftar atau terhapus, cari berdasarkan posisi CFrame tempat dipasang
                     if not targetTower or not targetTower:IsDescendantOf(Workspace) then
                         local correspondingPlaceAction = nil
                         for _, act in ipairs(recordedActions) do
@@ -776,8 +774,7 @@ local function playMacro()
 
                         if correspondingPlaceAction and correspondingPlaceAction.cframe then
                             local ignoreList = getPlacedTowersPlayList(action.towerIndex)
-                            -- Radius bertahap dari 8 hingga 15 studs
-                            local currentRadius = (attempt > 20) and 15 or 8
+                            local currentRadius = (attempt > 10) and 15 or 8
                             targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
                             
                             if targetTower then
@@ -794,20 +791,27 @@ local function playMacro()
                             res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                         end
                         
-                        -- Coba format remote fallback jika argumen pertama ditolak
                         if res == false then
                             res = upgradeRemote:InvokeServer(targetTower)
                         end
 
-                        if res ~= false then
+                        if res ~= false and res ~= nil then
                             successUpgrade = true
                             logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                             break
+                        else
+                            consecutiveFailures = consecutiveFailures + 1
+                            -- Jika ditolak 5x berturut-turut, anggap unit sudah MAX dan langsung paksakan lanjut ke aksi berikutnya
+                            if consecutiveFailures >= 5 then
+                                logConsole(string.format("[PLAY MAX DETECTED] Tower #%d menolak upgrade 5x (Sudah MAX). Skip ke aksi berikutnya!", action.towerIndex))
+                                successUpgrade = true
+                                break
+                            end
                         end
                     end
 
                     StatusLabel.Text = string.format("Status: Waiting Cash/Tower for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                    task.wait(0.2)
+                    task.wait(0.25)
                 end
 
                 if not successUpgrade then
