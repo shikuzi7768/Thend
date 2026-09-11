@@ -24,7 +24,7 @@ local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
 local isAutoPlayEnabled = false
-local currentSpeedMultiplier = 1 -- Menggantikan is2xSpeedEnabled (1, 2, atau 5)
+local currentSpeedMultiplier = 1
 local isAutoSummonEnabled = false
 
 -- Loop & Timing Variables
@@ -59,13 +59,15 @@ local function setGameSpeed(speed)
     end
 end
 
-local function findTowerByPosition(targetCFrame)
+local function findTowerByPosition(targetCFrame, maxDist)
     if not targetCFrame then return nil end
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
+    maxDist = maxDist or 8 -- Ditingkatkan dari 4 ke 8 studs agar lebih akurat saat lag speed x5
+
     local closestTower = nil
-    local shortestDistance = 4
+    local shortestDistance = maxDist
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
         if tower:IsA("Model") then
@@ -488,7 +490,7 @@ loadMacroFromFile = function(fileName)
 end
 
 -- ==========================================
--- HOOK RECORDING SYSTEM (SMART MATCHING)
+-- HOOK RECORDING SYSTEM
 -- ==========================================
 local function getTowerIndexFromRecord(towerInstance)
     if not towerInstance then return nil end
@@ -558,7 +560,6 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 
             local towerIndex = getTowerIndexFromRecord(targetTower)
 
-            -- SMART FALLBACK 1
             if not towerIndex and targetTower then
                 local targetPos = nil
                 if typeof(targetTower) == "Instance" then
@@ -583,7 +584,6 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
             end
 
-            -- SMART FALLBACK 2
             if not towerIndex and #placedTowersRecord > 0 then
                 towerIndex = #placedTowersRecord
             end
@@ -614,7 +614,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (UPGRADE RETRY & SPEED FIX)
+-- PLAYBACK ENGINE (OPTIMIZED FOR HIGH SPEED)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -640,7 +640,6 @@ local function playMacro()
         for index, action in ipairs(recordedActions) do
             if not isPlaying then break end
 
-            -- Penyesuaian timing dinamis berdasarkan speed multiplier
             local targetTime = action.time / currentSpeedMultiplier
             local timeToWait = targetTime - (tick() - playStartTime)
 
@@ -648,8 +647,8 @@ local function playMacro()
                 targetTime = action.time / currentSpeedMultiplier
                 timeToWait = targetTime - (tick() - playStartTime)
 
-                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, timeToWait)
-                task.wait(math.min(timeToWait, 0.1))
+                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, math.max(timeToWait, 0))
+                task.wait(math.min(timeToWait, 0.05))
             end
 
             if not isPlaying then break end
@@ -658,7 +657,7 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local newTowerInstance = nil
-                local maxAttempts = 10
+                local maxAttempts = 30
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
@@ -677,9 +676,13 @@ local function playMacro()
                         newTowerInstance = result[1]
                     end
 
+                    -- Fast Poll Replication Wait (Tunggu model tower terdeteksi di Workspace)
                     if not newTowerInstance and action.cframe then
-                        task.wait(0.2)
-                        newTowerInstance = findTowerByPosition(action.cframe)
+                        local searchStart = tick()
+                        repeat
+                            task.wait(0.05)
+                            newTowerInstance = findTowerByPosition(action.cframe)
+                        until newTowerInstance or (tick() - searchStart > 0.4)
                     end
 
                     if newTowerInstance then
@@ -688,7 +691,7 @@ local function playMacro()
                         break
                     else
                         StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(1)
+                        task.wait(0.2) -- Fast retry untuk speed x5
                     end
                 end
 
@@ -701,6 +704,7 @@ local function playMacro()
 
                 local targetTower = placedTowersPlay[action.towerIndex]
 
+                -- Apabila tower belum tersimpan atau terhapus, cari ulang via CFrame asal
                 if not targetTower or not targetTower:IsDescendantOf(Workspace) then
                     local correspondingPlaceAction = nil
                     for _, act in ipairs(recordedActions) do
@@ -711,33 +715,54 @@ local function playMacro()
                     end
 
                     if correspondingPlaceAction and correspondingPlaceAction.cframe then
-                        targetTower = findTowerByPosition(correspondingPlaceAction.cframe)
-                        placedTowersPlay[action.towerIndex] = targetTower
+                        local searchStart = tick()
+                        repeat
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe)
+                            if not targetTower then task.wait(0.05) end
+                        until targetTower or (tick() - searchStart > 0.5)
+
+                        if targetTower then
+                            placedTowersPlay[action.towerIndex] = targetTower
+                        end
                     end
                 end
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 15
+                    local maxAttempts = 50
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
                         
-                        local res
-                        if action.extraArgs and #action.extraArgs > 0 then
-                            res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
-                        else
-                            res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                        -- Re-verify jika tower hilang saat proses retry
+                        if not targetTower:IsDescendantOf(Workspace) then
+                            for _, act in ipairs(recordedActions) do
+                                if act.actionType == "Place" and act.towerIndex == action.towerIndex and act.cframe then
+                                    targetTower = findTowerByPosition(act.cframe)
+                                    placedTowersPlay[action.towerIndex] = targetTower
+                                    break
+                                end
+                            end
                         end
-                        
-                        if res ~= false then
-                            successUpgrade = true
-                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
-                            break
-                        else
-                            StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                            task.wait(1)
+
+                        if targetTower then
+                            local res
+                            if action.extraArgs and #action.extraArgs > 0 then
+                                res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
+                            else
+                                res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                            end
+                            
+                            -- Apabila remote merespon sukses (bukan false)
+                            if res ~= false then
+                                successUpgrade = true
+                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
+                                break
+                            end
                         end
+
+                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                        task.wait(0.15) -- Diturunkan dari 1s ke 0.15s agar responsif di speed x5
                     end
 
                     if not successUpgrade then
