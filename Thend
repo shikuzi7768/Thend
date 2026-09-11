@@ -544,8 +544,11 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
 
             if not spawnedTower and args[2] then
-                task.wait(0.1)
-                spawnedTower = findTowerByPosition(args[2], 6, placedTowersRecord)
+                local searchStart = tick()
+                repeat
+                    task.wait(0.05)
+                    spawnedTower = findTowerByPosition(args[2], 6, placedTowersRecord)
+                until spawnedTower or (tick() - searchStart > 1.5)
             end
 
             if not spawnedTower and (result == false or result == nil) then
@@ -580,7 +583,6 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         elseif self.Name == "UpgradeTower" then
             local result = rawNamecall(self, ...)
 
-            -- Hanya baikan jika server secara eksplisit mengembalikan false (gagal/invalid)
             if result == false then
                 logConsole("[REC WARN] Upgrade ditolak server. Aksi diabaikan.")
                 return result
@@ -647,7 +649,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (SUFFICIENT WAIT FOR MAX UPGRADE)
+-- PLAYBACK ENGINE (RELIABLE RETRY & INDEXING FIX)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -695,15 +697,20 @@ local function playMacro()
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
-                    local result = spawnRemote:InvokeServer(
-                        action.towerName,
-                        action.cframe,
-                        action.arg3,
-                        action.arg4,
-                        action.arg5
-                    )
+                    -- Cek dulu apakah tower sudah ada di map dari attempt sebelumnya
+                    if action.cframe then
+                        newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
+                    end
 
-                    if result ~= false then
+                    if not newTowerInstance then
+                        local result = spawnRemote:InvokeServer(
+                            action.towerName,
+                            action.cframe,
+                            action.arg3,
+                            action.arg4,
+                            action.arg5
+                        )
+
                         if typeof(result) == "Instance" then
                             newTowerInstance = result
                         elseif typeof(result) == "table" and result[1] then
@@ -715,7 +722,7 @@ local function playMacro()
                             repeat
                                 task.wait(0.05)
                                 newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
-                            until newTowerInstance or (tick() - searchStart > 0.3)
+                            until newTowerInstance or (tick() - searchStart > 1.5)
                         end
                     end
 
@@ -736,72 +743,54 @@ local function playMacro()
             elseif action.actionType == "Upgrade" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
 
-                local targetTower = placedTowersPlay[action.towerIndex]
+                local successUpgrade = false
+                local maxAttempts = 200
 
-                if not targetTower or not targetTower:IsDescendantOf(Workspace) then
-                    local correspondingPlaceAction = nil
-                    for _, act in ipairs(recordedActions) do
-                        if act.actionType == "Place" and act.towerIndex == action.towerIndex then
-                            correspondingPlaceAction = act
-                            break
-                        end
-                    end
+                -- Loop retry upgrade
+                for attempt = 1, maxAttempts do
+                    if not isPlaying then break end
 
-                    if correspondingPlaceAction and correspondingPlaceAction.cframe then
-                        local searchStart = tick()
-                        repeat
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 6)
-                            if not targetTower then task.wait(0.05) end
-                        until targetTower or (tick() - searchStart > 0.5)
+                    -- Selalu pastikan instance targetTower valid di tiap iterasi loop
+                    local targetTower = placedTowersPlay[action.towerIndex]
 
-                        if targetTower then
-                            placedTowersPlay[action.towerIndex] = targetTower
-                        end
-                    end
-                end
-
-                if targetTower then
-                    local successUpgrade = false
-                    local maxAttempts = 200 -- Dinaikkan ke 200 (~40s) agar cukup mengumpulkan uang untuk Max Upgrade
-
-                    for attempt = 1, maxAttempts do
-                        if not isPlaying then break end
-                        
-                        if not targetTower:IsDescendantOf(Workspace) then
-                            for _, act in ipairs(recordedActions) do
-                                if act.actionType == "Place" and act.towerIndex == action.towerIndex and act.cframe then
-                                    targetTower = findTowerByPosition(act.cframe, 6)
-                                    placedTowersPlay[action.towerIndex] = targetTower
-                                    break
-                                end
-                            end
-                        end
-
-                        if targetTower then
-                            local res
-                            if action.extraArgs and #action.extraArgs > 0 then
-                                res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
-                            else
-                                res = upgradeRemote:InvokeServer(targetTower, action.towerName)
-                            end
-                            
-                            -- Menerima respon true atau nil (asalkan bukan false)
-                            if res ~= false then
-                                successUpgrade = true
-                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
+                    if not targetTower or not targetTower:IsDescendantOf(Workspace) then
+                        local correspondingPlaceAction = nil
+                        for _, act in ipairs(recordedActions) do
+                            if act.actionType == "Place" and act.towerIndex == action.towerIndex then
+                                correspondingPlaceAction = act
                                 break
                             end
                         end
 
-                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(0.2)
+                        if correspondingPlaceAction and correspondingPlaceAction.cframe then
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 6)
+                            if targetTower then
+                                placedTowersPlay[action.towerIndex] = targetTower
+                            end
+                        end
                     end
 
-                    if not successUpgrade then
-                        logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati. Melanjutkan ke aksi berikutnya...", action.towerIndex))
+                    if targetTower then
+                        local res
+                        if action.extraArgs and #action.extraArgs > 0 then
+                            res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
+                        else
+                            res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                        end
+                        
+                        if res ~= false then
+                            successUpgrade = true
+                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
+                            break
+                        end
                     end
-                else
-                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
+
+                    StatusLabel.Text = string.format("Status: Waiting Cash/Tower for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                    task.wait(0.2)
+                end
+
+                if not successUpgrade then
+                    logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati. Melanjutkan ke aksi berikutnya...", action.towerIndex))
                 end
             end
         end
