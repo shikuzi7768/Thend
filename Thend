@@ -59,13 +59,12 @@ local function setGameSpeed(speed)
     end
 end
 
--- Ditingkatkan: Menambahkan parameter ignoreTable agar tidak salah mendeteksi unit lama
 local function findTowerByPosition(targetCFrame, maxDist, ignoreTable)
     if not targetCFrame then return nil end
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
-    maxDist = maxDist or 6 -- Radius diperketat ke 6 studs
+    maxDist = maxDist or 6
     ignoreTable = ignoreTable or {}
 
     local closestTower = nil
@@ -579,6 +578,15 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             return result
 
         elseif self.Name == "UpgradeTower" then
+            -- Jalankan remote server terlebih dahulu untuk mengecek apakah upgrade valid
+            local result = rawNamecall(self, ...)
+
+            -- Jika server menolak upgrade (karena Max Level atau uang kurang), jangan rekam
+            if result == false then
+                logConsole("[REC WARN] Upgrade ditolak server (Max level / Uang kurang). Aksi diabaikan.")
+                return result
+            end
+
             local targetTower = args[1]
             local towerName = args[2]
 
@@ -631,6 +639,8 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             else
                 logConsole("[REC WARN] Upgrade gagal direkam: Tidak ada tower yang terdaftar.")
             end
+
+            return result
         end
     end
 
@@ -638,7 +648,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (FIX DUPLICATE DETECTION)
+-- PLAYBACK ENGINE (FIX MAX LEVEL UPGRADE BLOCK)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -694,7 +704,6 @@ local function playMacro()
                         action.arg5
                     )
 
-                    -- Hanya cari tower baru jika panggilan remote TIDAK mengembalikan false (uang cukup)
                     if result ~= false then
                         if typeof(result) == "Instance" then
                             newTowerInstance = result
@@ -706,7 +715,6 @@ local function playMacro()
                             local searchStart = tick()
                             repeat
                                 task.wait(0.05)
-                                -- Mengabaikan tower yang sudah terpasang di placedTowersPlay
                                 newTowerInstance = findTowerByPosition(action.cframe, 6, placedTowersPlay)
                             until newTowerInstance or (tick() - searchStart > 0.3)
                         end
@@ -755,7 +763,7 @@ local function playMacro()
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 600
+                    local maxAttempts = 15 -- Batas percobaan dikurangi dari 600 menjadi 15 agar tidak macet
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
@@ -778,19 +786,19 @@ local function playMacro()
                                 res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                             end
                             
-                            if res ~= false then
+                            if res ~= false and res ~= nil then
                                 successUpgrade = true
-                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
+                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                                 break
                             end
                         end
 
-                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(0.15)
+                        StatusLabel.Text = string.format("Status: Waiting Cash / Checking Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                        task.wait(0.2)
                     end
 
                     if not successUpgrade then
-                        logConsole(string.format("[PLAY WARN] Upgrade Tower #%d Gagal setelah %d Percobaan!", action.towerIndex, maxAttempts))
+                        logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati (Tower sudah Max Level / Invalid). Melanjutkan ke aksi berikutnya...", action.towerIndex))
                     end
                 else
                     logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
