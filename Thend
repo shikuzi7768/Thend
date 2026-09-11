@@ -578,12 +578,11 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             return result
 
         elseif self.Name == "UpgradeTower" then
-            -- Jalankan remote server terlebih dahulu untuk mengecek apakah upgrade valid
             local result = rawNamecall(self, ...)
 
-            -- Jika server menolak upgrade (karena Max Level atau uang kurang), jangan rekam
+            -- Hanya baikan jika server secara eksplisit mengembalikan false (gagal/invalid)
             if result == false then
-                logConsole("[REC WARN] Upgrade ditolak server (Max level / Uang kurang). Aksi diabaikan.")
+                logConsole("[REC WARN] Upgrade ditolak server. Aksi diabaikan.")
                 return result
             end
 
@@ -648,7 +647,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (FIX MAX LEVEL UPGRADE BLOCK)
+-- PLAYBACK ENGINE (SUFFICIENT WAIT FOR MAX UPGRADE)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -763,7 +762,7 @@ local function playMacro()
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 15 -- Batas percobaan dikurangi dari 600 menjadi 15 agar tidak macet
+                    local maxAttempts = 200 -- Dinaikkan ke 200 (~40s) agar cukup mengumpulkan uang untuk Max Upgrade
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
@@ -786,19 +785,20 @@ local function playMacro()
                                 res = upgradeRemote:InvokeServer(targetTower, action.towerName)
                             end
                             
-                            if res ~= false and res ~= nil then
+                            -- Menerima respon true atau nil (asalkan bukan false)
+                            if res ~= false then
                                 successUpgrade = true
                                 logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                                 break
                             end
                         end
 
-                        StatusLabel.Text = string.format("Status: Waiting Cash / Checking Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
                         task.wait(0.2)
                     end
 
                     if not successUpgrade then
-                        logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati (Tower sudah Max Level / Invalid). Melanjutkan ke aksi berikutnya...", action.towerIndex))
+                        logConsole(string.format("[PLAY SKIP] Upgrade Tower #%d dilewati. Melanjutkan ke aksi berikutnya...", action.towerIndex))
                     end
                 else
                     logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
