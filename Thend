@@ -64,7 +64,7 @@ local function findTowerByPosition(targetCFrame, maxDist)
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
-    maxDist = maxDist or 8
+    maxDist = maxDist or 15
 
     local closestTower = nil
     local shortestDistance = maxDist
@@ -249,7 +249,7 @@ RefreshBtn.TextSize = 12
 RefreshBtn.Parent = ContentFrame
 Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0, 4)
 
--- Delete Macro Button (FITUR BARU)
+-- Delete Macro Button
 local DeleteBtn = Instance.new("TextButton")
 DeleteBtn.Size = UDim2.new(0.43, 0, 0, 25)
 DeleteBtn.Position = UDim2.new(0.52, 0, 0, 140)
@@ -580,7 +580,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                 end
 
                 if targetPos then
-                    local shortestDistance = 8
+                    local shortestDistance = 15
                     for idx, recTower in pairs(placedTowersRecord) do
                         if recTower and recTower:IsDescendantOf(Workspace) then
                             local recPart = recTower.PrimaryPart or recTower:FindFirstChildWhichIsA("BasePart")
@@ -626,7 +626,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (OPTIMIZED FOR HIGH SPEED)
+-- PLAYBACK ENGINE (OPTIMIZED FIX FOR TIMEOUT & CASH)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -669,7 +669,7 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local newTowerInstance = nil
-                local maxAttempts = 30
+                local maxAttempts = 600 -- Diperpanjang hingga 2 menit tunggu per unit
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
@@ -692,7 +692,7 @@ local function playMacro()
                         local searchStart = tick()
                         repeat
                             task.wait(0.05)
-                            newTowerInstance = findTowerByPosition(action.cframe)
+                            newTowerInstance = findTowerByPosition(action.cframe, 15)
                         until newTowerInstance or (tick() - searchStart > 0.4)
                     end
 
@@ -727,7 +727,7 @@ local function playMacro()
                     if correspondingPlaceAction and correspondingPlaceAction.cframe then
                         local searchStart = tick()
                         repeat
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe)
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, 15)
                             if not targetTower then task.wait(0.05) end
                         until targetTower or (tick() - searchStart > 0.5)
 
@@ -739,7 +739,7 @@ local function playMacro()
 
                 if targetTower then
                     local successUpgrade = false
-                    local maxAttempts = 50
+                    local maxAttempts = 600
 
                     for attempt = 1, maxAttempts do
                         if not isPlaying then break end
@@ -747,7 +747,7 @@ local function playMacro()
                         if not targetTower:IsDescendantOf(Workspace) then
                             for _, act in ipairs(recordedActions) do
                                 if act.actionType == "Place" and act.towerIndex == action.towerIndex and act.cframe then
-                                    targetTower = findTowerByPosition(act.cframe)
+                                    targetTower = findTowerByPosition(act.cframe, 15)
                                     placedTowersPlay[action.towerIndex] = targetTower
                                     break
                                 end
@@ -833,7 +833,7 @@ RefreshBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- EVENT HAPUS FILE MACRO (FITUR BARU)
+-- EVENT HAPUS FILE MACRO
 DeleteBtn.MouseButton1Click:Connect(function()
     if not supportsFileSystem then
         StatusLabel.Text = "Status: Executor tidak mendukung FileSystem!"
