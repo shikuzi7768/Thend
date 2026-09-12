@@ -4,7 +4,7 @@ local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- Check Executor File System Support (Termasuk delfile & isfile)
+-- Check Executor File System Support
 local supportsFileSystem = (writefile and readfile and isfolder and makefolder and listfiles and delfile and isfile)
 if not supportsFileSystem then
     warn("[Macro System]: Executor kamu tidak mendukung File System lengkap (writefile/readfile/delfile)!")
@@ -47,7 +47,7 @@ end
 local saveConfigToFile, loadConfigFromFile, loadMacroFromFile
 
 -- ==========================================
--- HELPER FUNCTIONS (CASH CHECKER, POS, & SPEED)
+-- HELPER FUNCTIONS (ENHANCED TOWER LOOKUP)
 -- ==========================================
 local function setGameSpeed(speed)
     local functionsFolder = ReplicatedStorage:FindFirstChild("Functions")
@@ -59,24 +59,35 @@ local function setGameSpeed(speed)
     end
 end
 
-local function findTowerByPosition(targetCFrame, maxDist)
+local function findTowerByPosition(targetCFrame, maxDist, ignoreTable)
     if not targetCFrame then return nil end
     local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
     if not towersFolder then return nil end
 
-    maxDist = maxDist or 8
+    maxDist = maxDist or 6
+    ignoreTable = ignoreTable or {}
 
     local closestTower = nil
     local shortestDistance = maxDist
 
     for _, tower in ipairs(towersFolder:GetChildren()) do
         if tower:IsA("Model") then
-            local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
-            if primaryPart then
-                local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closestTower = tower
+            local isIgnored = false
+            for _, ignoredTower in pairs(ignoreTable) do
+                if ignoredTower == tower then
+                    isIgnored = true
+                    break
+                end
+            end
+
+            if not isIgnored then
+                local primaryPart = tower.PrimaryPart or tower:FindFirstChild("HumanoidRootPart") or tower:FindFirstChildWhichIsA("BasePart")
+                if primaryPart then
+                    local dist = (primaryPart.Position - targetCFrame.Position).Magnitude
+                    if dist < shortestDistance then
+                        shortestDistance = dist
+                        closestTower = tower
+                    end
                 end
             end
         end
@@ -93,6 +104,16 @@ local function getEventRemote(nameList)
         if remote then return remote end
     end
     return nil
+end
+
+local function getPlacedTowersPlayList(excludeIndex)
+    local ignoreList = {}
+    for idx, towerModel in pairs(placedTowersPlay) do
+        if idx ~= excludeIndex and towerModel then
+            table.insert(ignoreList, towerModel)
+        end
+    end
+    return ignoreList
 end
 
 -- ==========================================
@@ -249,7 +270,7 @@ RefreshBtn.TextSize = 12
 RefreshBtn.Parent = ContentFrame
 Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0, 4)
 
--- Delete Macro Button (FITUR BARU)
+-- Delete Macro Button
 local DeleteBtn = Instance.new("TextButton")
 DeleteBtn.Size = UDim2.new(0.43, 0, 0, 25)
 DeleteBtn.Position = UDim2.new(0.52, 0, 0, 140)
@@ -533,8 +554,11 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             end
 
             if not spawnedTower and args[2] then
-                task.wait(0.1)
-                spawnedTower = findTowerByPosition(args[2])
+                local searchStart = tick()
+                repeat
+                    task.wait(0.05)
+                    spawnedTower = findTowerByPosition(args[2], 8, placedTowersRecord)
+                until spawnedTower or (tick() - searchStart > 1.5)
             end
 
             if not spawnedTower and (result == false or result == nil) then
@@ -567,6 +591,13 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             return result
 
         elseif self.Name == "UpgradeTower" then
+            local result = rawNamecall(self, ...)
+
+            if result == false then
+                logConsole("[REC WARN] Upgrade ditolak server (Uang kurang/Max). Aksi diabaikan.")
+                return result
+            end
+
             local targetTower = args[1]
             local towerName = args[2]
 
@@ -619,6 +650,8 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
             else
                 logConsole("[REC WARN] Upgrade gagal direkam: Tidak ada tower yang terdaftar.")
             end
+
+            return result
         end
     end
 
@@ -626,7 +659,7 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (OPTIMIZED FOR HIGH SPEED)
+-- PLAYBACK ENGINE (WAIT FOR CASH FIXED)
 -- ==========================================
 local function playMacro()
     if isPlaying or #recordedActions == 0 then return end
@@ -669,31 +702,39 @@ local function playMacro()
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
 
                 local newTowerInstance = nil
-                local maxAttempts = 30
+                local maxAttempts = 600
 
                 for attempt = 1, maxAttempts do
                     if not isPlaying then break end
 
-                    local result = spawnRemote:InvokeServer(
-                        action.towerName,
-                        action.cframe,
-                        action.arg3,
-                        action.arg4,
-                        action.arg5
-                    )
+                    local ignoreList = getPlacedTowersPlayList(action.towerIndex)
 
-                    if typeof(result) == "Instance" then
-                        newTowerInstance = result
-                    elseif typeof(result) == "table" and result[1] then
-                        newTowerInstance = result[1]
+                    if action.cframe then
+                        newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
                     end
 
-                    if not newTowerInstance and action.cframe then
-                        local searchStart = tick()
-                        repeat
-                            task.wait(0.05)
-                            newTowerInstance = findTowerByPosition(action.cframe)
-                        until newTowerInstance or (tick() - searchStart > 0.4)
+                    if not newTowerInstance then
+                        local result = spawnRemote:InvokeServer(
+                            action.towerName,
+                            action.cframe,
+                            action.arg3,
+                            action.arg4,
+                            action.arg5
+                        )
+
+                        if typeof(result) == "Instance" then
+                            newTowerInstance = result
+                        elseif typeof(result) == "table" and result[1] then
+                            newTowerInstance = result[1]
+                        end
+
+                        if not newTowerInstance and action.cframe then
+                            local searchStart = tick()
+                            repeat
+                                task.wait(0.05)
+                                newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
+                            until newTowerInstance or (tick() - searchStart > 1.5)
+                        end
                     end
 
                     if newTowerInstance then
@@ -713,71 +754,75 @@ local function playMacro()
             elseif action.actionType == "Upgrade" then
                 StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
 
-                local targetTower = placedTowersPlay[action.towerIndex]
+                local successUpgrade = false
+                local maxAttempts = 300 -- Memberikan waktu hingga ~75 detik untuk mengumpulkan uang
 
-                if not targetTower or not targetTower:IsDescendantOf(Workspace) then
-                    local correspondingPlaceAction = nil
-                    for _, act in ipairs(recordedActions) do
-                        if act.actionType == "Place" and act.towerIndex == action.towerIndex then
-                            correspondingPlaceAction = act
-                            break
-                        end
-                    end
+                for attempt = 1, maxAttempts do
+                    if not isPlaying then break end
 
-                    if correspondingPlaceAction and correspondingPlaceAction.cframe then
-                        local searchStart = tick()
-                        repeat
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe)
-                            if not targetTower then task.wait(0.05) end
-                        until targetTower or (tick() - searchStart > 0.5)
+                    local targetTower = placedTowersPlay[action.towerIndex]
 
-                        if targetTower then
-                            placedTowersPlay[action.towerIndex] = targetTower
-                        end
-                    end
-                end
-
-                if targetTower then
-                    local successUpgrade = false
-                    local maxAttempts = 50
-
-                    for attempt = 1, maxAttempts do
-                        if not isPlaying then break end
-                        
-                        if not targetTower:IsDescendantOf(Workspace) then
-                            for _, act in ipairs(recordedActions) do
-                                if act.actionType == "Place" and act.towerIndex == action.towerIndex and act.cframe then
-                                    targetTower = findTowerByPosition(act.cframe)
-                                    placedTowersPlay[action.towerIndex] = targetTower
-                                    break
-                                end
-                            end
-                        end
-
-                        if targetTower then
-                            local res
-                            if action.extraArgs and #action.extraArgs > 0 then
-                                res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
-                            else
-                                res = upgradeRemote:InvokeServer(targetTower, action.towerName)
-                            end
-                            
-                            if res ~= false then
-                                successUpgrade = true
-                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s) - Percobaan %d", index, #recordedActions, action.towerIndex, targetTower.Name, attempt))
+                    if not targetTower or not targetTower:IsDescendantOf(Workspace) then
+                        local correspondingPlaceAction = nil
+                        for _, act in ipairs(recordedActions) do
+                            if act.actionType == "Place" and act.towerIndex == action.towerIndex then
+                                correspondingPlaceAction = act
                                 break
                             end
                         end
 
-                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(0.15)
+                        if correspondingPlaceAction and correspondingPlaceAction.cframe then
+                            local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+                            local currentRadius = (attempt > 10) and 15 or 8
+                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
+                            
+                            if targetTower then
+                                placedTowersPlay[action.towerIndex] = targetTower
+                            end
+                        end
                     end
 
-                    if not successUpgrade then
-                        logConsole(string.format("[PLAY WARN] Upgrade Tower #%d Gagal setelah %d Percobaan!", action.towerIndex, maxAttempts))
+                    if targetTower then
+                        -- Cek jika game memiliki atribut penanda MAX langsung pada model tower
+                        local isMaxLevel = false
+                        pcall(function()
+                            if targetTower:GetAttribute("Max") == true or targetTower:GetAttribute("IsMax") == true then
+                                isMaxLevel = true
+                            elseif targetTower:FindFirstChild("Max") or targetTower:FindFirstChild("IsMax") then
+                                isMaxLevel = true
+                            end
+                        end)
+
+                        if isMaxLevel then
+                            logConsole(string.format("[PLAY MAX DETECTED] Tower #%d sudah MAX. Menyeberang ke aksi berikutnya.", action.towerIndex))
+                            successUpgrade = true
+                            break
+                        end
+
+                        local res
+                        if action.extraArgs and #action.extraArgs > 0 then
+                            res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
+                        else
+                            res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                        end
+                        
+                        if res == false then
+                            res = upgradeRemote:InvokeServer(targetTower)
+                        end
+
+                        if res ~= false and res ~= nil then
+                            successUpgrade = true
+                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
+                            break
+                        end
                     end
-                else
-                    logConsole(string.format("[PLAY ERROR] Gagal Upgrade: Tower ID #%d tidak ditemukan di Map!", action.towerIndex))
+
+                    StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nAttempt (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                    task.wait(0.25)
+                end
+
+                if not successUpgrade then
+                    logConsole(string.format("[PLAY TIMEOUT] Upgrade Tower #%d dilewati setelah batas waktu habis.", action.towerIndex))
                 end
             end
         end
@@ -833,7 +878,6 @@ RefreshBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- EVENT HAPUS FILE MACRO (FITUR BARU)
 DeleteBtn.MouseButton1Click:Connect(function()
     if not supportsFileSystem then
         StatusLabel.Text = "Status: Executor tidak mendukung FileSystem!"
