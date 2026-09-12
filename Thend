@@ -44,7 +44,7 @@ local function logConsole(msg)
 end
 
 -- Forward Declarations
-local saveConfigToFile, loadConfigFromFile, loadMacroFromFile
+local saveConfigToFile, loadConfigFromFile, loadMacroFromFile, playMacroQueue, getMultiMacroList
 
 -- ==========================================
 -- HELPER FUNCTIONS (ENHANCED TOWER LOOKUP)
@@ -132,8 +132,8 @@ end
 ScreenGui.Parent = playerGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 240, 0, 520)
-MainFrame.Position = UDim2.new(0.02, 0, 0.25, 0)
+MainFrame.Size = UDim2.new(0, 240, 0, 570)
+MainFrame.Position = UDim2.new(0.02, 0, 0.2, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -210,22 +210,47 @@ RecordBtn.TextSize = 14
 RecordBtn.Parent = ContentFrame
 Instance.new("UICorner", RecordBtn).CornerRadius = UDim.new(0, 4)
 
--- Play Button
+-- Single Play Button
 local PlayBtn = Instance.new("TextButton")
-PlayBtn.Size = UDim2.new(0.9, 0, 0, 30)
+PlayBtn.Size = UDim2.new(0.43, 0, 0, 30)
 PlayBtn.Position = UDim2.new(0.05, 0, 0, 40)
 PlayBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 200)
-PlayBtn.Text = "Play"
+PlayBtn.Text = "Play Single"
 PlayBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 PlayBtn.Font = Enum.Font.SourceSans
-PlayBtn.TextSize = 14
+PlayBtn.TextSize = 13
 PlayBtn.Parent = ContentFrame
 Instance.new("UICorner", PlayBtn).CornerRadius = UDim.new(0, 4)
+
+-- Play Multi Button
+local PlayMultiBtn = Instance.new("TextButton")
+PlayMultiBtn.Size = UDim2.new(0.43, 0, 0, 30)
+PlayMultiBtn.Position = UDim2.new(0.52, 0, 0, 40)
+PlayMultiBtn.BackgroundColor3 = Color3.fromRGB(140, 60, 200)
+PlayMultiBtn.Text = "Play Multi"
+PlayMultiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlayMultiBtn.Font = Enum.Font.SourceSansBold
+PlayMultiBtn.TextSize = 13
+PlayMultiBtn.Parent = ContentFrame
+Instance.new("UICorner", PlayMultiBtn).CornerRadius = UDim.new(0, 4)
+
+-- Multi Macro Input Box
+local MultiNameBox = Instance.new("TextBox")
+MultiNameBox.Size = UDim2.new(0.9, 0, 0, 25)
+MultiNameBox.Position = UDim2.new(0.05, 0, 0, 75)
+MultiNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MultiNameBox.Text = "Macro1, Macro2"
+MultiNameBox.PlaceholderText = "Urutan Macro: Macro1, Macro2"
+MultiNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+MultiNameBox.Font = Enum.Font.SourceSans
+MultiNameBox.TextSize = 12
+MultiNameBox.Parent = ContentFrame
+Instance.new("UICorner", MultiNameBox).CornerRadius = UDim.new(0, 4)
 
 -- Save Input Box
 local SaveNameBox = Instance.new("TextBox")
 SaveNameBox.Size = UDim2.new(0.6, 0, 0, 30)
-SaveNameBox.Position = UDim2.new(0.05, 0, 0, 75)
+SaveNameBox.Position = UDim2.new(0.05, 0, 0, 105)
 SaveNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 SaveNameBox.Text = "Macro1"
 SaveNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -237,7 +262,7 @@ Instance.new("UICorner", SaveNameBox).CornerRadius = UDim.new(0, 4)
 -- Save Button
 local SaveBtn = Instance.new("TextButton")
 SaveBtn.Size = UDim2.new(0.28, 0, 0, 30)
-SaveBtn.Position = UDim2.new(0.67, 0, 0, 75)
+SaveBtn.Position = UDim2.new(0.67, 0, 0, 105)
 SaveBtn.BackgroundColor3 = Color3.fromRGB(180, 120, 30)
 SaveBtn.Text = "Save"
 SaveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -249,7 +274,7 @@ Instance.new("UICorner", SaveBtn).CornerRadius = UDim.new(0, 4)
 -- Selected Macro Label
 local SelectLabel = Instance.new("TextLabel")
 SelectLabel.Size = UDim2.new(0.9, 0, 0, 25)
-SelectLabel.Position = UDim2.new(0.05, 0, 0, 110)
+SelectLabel.Position = UDim2.new(0.05, 0, 0, 140)
 SelectLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 SelectLabel.Text = "Selected: None"
 SelectLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -261,7 +286,7 @@ Instance.new("UICorner", SelectLabel).CornerRadius = UDim.new(0, 4)
 -- Refresh/Switch Button
 local RefreshBtn = Instance.new("TextButton")
 RefreshBtn.Size = UDim2.new(0.43, 0, 0, 25)
-RefreshBtn.Position = UDim2.new(0.05, 0, 0, 140)
+RefreshBtn.Position = UDim2.new(0.05, 0, 0, 170)
 RefreshBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
 RefreshBtn.Text = "Switch Macro"
 RefreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -273,7 +298,7 @@ Instance.new("UICorner", RefreshBtn).CornerRadius = UDim.new(0, 4)
 -- Delete Macro Button
 local DeleteBtn = Instance.new("TextButton")
 DeleteBtn.Size = UDim2.new(0.43, 0, 0, 25)
-DeleteBtn.Position = UDim2.new(0.52, 0, 0, 140)
+DeleteBtn.Position = UDim2.new(0.52, 0, 0, 170)
 DeleteBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
 DeleteBtn.Text = "Delete File"
 DeleteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -285,7 +310,7 @@ Instance.new("UICorner", DeleteBtn).CornerRadius = UDim.new(0, 4)
 -- Auto Play Toggle Button
 local AutoPlayBtn = Instance.new("TextButton")
 AutoPlayBtn.Size = UDim2.new(0.9, 0, 0, 30)
-AutoPlayBtn.Position = UDim2.new(0.05, 0, 0, 170)
+AutoPlayBtn.Position = UDim2.new(0.05, 0, 0, 200)
 AutoPlayBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 AutoPlayBtn.Text = "Auto Play: OFF"
 AutoPlayBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -297,7 +322,7 @@ Instance.new("UICorner", AutoPlayBtn).CornerRadius = UDim.new(0, 4)
 -- Speed Multiplier Toggle Button
 local SpeedBtn = Instance.new("TextButton")
 SpeedBtn.Size = UDim2.new(0.9, 0, 0, 30)
-SpeedBtn.Position = UDim2.new(0.05, 0, 0, 205)
+SpeedBtn.Position = UDim2.new(0.05, 0, 0, 235)
 SpeedBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 SpeedBtn.Text = "Speed: 1x"
 SpeedBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -309,7 +334,7 @@ Instance.new("UICorner", SpeedBtn).CornerRadius = UDim.new(0, 4)
 -- Map Input Box
 local MapNameBox = Instance.new("TextBox")
 MapNameBox.Size = UDim2.new(0.6, 0, 0, 30)
-MapNameBox.Position = UDim2.new(0.05, 0, 0, 240)
+MapNameBox.Position = UDim2.new(0.05, 0, 0, 270)
 MapNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 MapNameBox.Text = "Desert"
 MapNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -321,7 +346,7 @@ Instance.new("UICorner", MapNameBox).CornerRadius = UDim.new(0, 4)
 -- Auto Vote Map Toggle Button
 local AutoVoteBtn = Instance.new("TextButton")
 AutoVoteBtn.Size = UDim2.new(0.28, 0, 0, 30)
-AutoVoteBtn.Position = UDim2.new(0.67, 0, 0, 240)
+AutoVoteBtn.Position = UDim2.new(0.67, 0, 0, 270)
 AutoVoteBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 AutoVoteBtn.Text = "Vote ON"
 AutoVoteBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -333,7 +358,7 @@ Instance.new("UICorner", AutoVoteBtn).CornerRadius = UDim.new(0, 4)
 -- Difficulty Input Box
 local DiffNameBox = Instance.new("TextBox")
 DiffNameBox.Size = UDim2.new(0.6, 0, 0, 30)
-DiffNameBox.Position = UDim2.new(0.05, 0, 0, 275)
+DiffNameBox.Position = UDim2.new(0.05, 0, 0, 305)
 DiffNameBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 DiffNameBox.Text = "Nightmare"
 DiffNameBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -345,7 +370,7 @@ Instance.new("UICorner", DiffNameBox).CornerRadius = UDim.new(0, 4)
 -- Auto Vote Difficulty Toggle Button
 local AutoVoteDiffBtn = Instance.new("TextButton")
 AutoVoteDiffBtn.Size = UDim2.new(0.28, 0, 0, 30)
-AutoVoteDiffBtn.Position = UDim2.new(0.67, 0, 0, 275)
+AutoVoteDiffBtn.Position = UDim2.new(0.67, 0, 0, 305)
 AutoVoteDiffBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 AutoVoteDiffBtn.Text = "Diff ON"
 AutoVoteDiffBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -357,7 +382,7 @@ Instance.new("UICorner", AutoVoteDiffBtn).CornerRadius = UDim.new(0, 4)
 -- Auto Summon Toggle Button
 local AutoSummonBtn = Instance.new("TextButton")
 AutoSummonBtn.Size = UDim2.new(0.9, 0, 0, 30)
-AutoSummonBtn.Position = UDim2.new(0.05, 0, 0, 310)
+AutoSummonBtn.Position = UDim2.new(0.05, 0, 0, 340)
 AutoSummonBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
 AutoSummonBtn.Text = "Auto Summon (10x): OFF"
 AutoSummonBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -368,8 +393,8 @@ Instance.new("UICorner", AutoSummonBtn).CornerRadius = UDim.new(0, 4)
 
 -- Detailed Status Info Label
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Size = UDim2.new(0.9, 0, 0, 135)
-StatusLabel.Position = UDim2.new(0.05, 0, 0, 345)
+StatusLabel.Size = UDim2.new(0.9, 0, 0, 155)
+StatusLabel.Position = UDim2.new(0.05, 0, 0, 375)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 StatusLabel.Text = "Status: Ready\nSilahkan pilih Macro atau mulai Recording."
 StatusLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
@@ -389,7 +414,7 @@ MinimizeBtn.MouseButton1Click:Connect(function()
         ContentFrame.Visible = false
         MinimizeBtn.Text = "+"
     else
-        MainFrame.Size = UDim2.new(0, 240, 0, 520)
+        MainFrame.Size = UDim2.new(0, 240, 0, 570)
         ContentFrame.Visible = true
         MinimizeBtn.Text = "-"
     end
@@ -402,6 +427,18 @@ end)
 -- ==========================================
 -- SAVE & LOAD CONFIG / MACRO SYSTEM
 -- ==========================================
+getMultiMacroList = function()
+    local text = MultiNameBox.Text
+    local list = {}
+    for name in string.gmatch(text, "[^,]+") do
+        local trimmed = string.match(name, "^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then
+            table.insert(list, trimmed)
+        end
+    end
+    return list
+end
+
 saveConfigToFile = function()
     if not supportsFileSystem then return end
     local configData = {
@@ -413,7 +450,8 @@ saveConfigToFile = function()
         mapName = MapNameBox.Text,
         diffName = DiffNameBox.Text,
         selectedMacro = selectedMacroFile,
-        saveInputText = SaveNameBox.Text
+        saveInputText = SaveNameBox.Text,
+        multiMacroText = MultiNameBox.Text
     }
     writefile(CONFIG_FILE, HttpService:JSONEncode(configData))
 end
@@ -458,6 +496,7 @@ loadConfigFromFile = function()
         if result.mapName then MapNameBox.Text = result.mapName end
         if result.diffName then DiffNameBox.Text = result.diffName end
         if result.saveInputText then SaveNameBox.Text = result.saveInputText end
+        if result.multiMacroText then MultiNameBox.Text = result.multiMacroText end
         if result.selectedMacro and result.selectedMacro ~= "" then loadMacroFromFile(result.selectedMacro) end
     end
 end
@@ -659,10 +698,14 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
 end)
 
 -- ==========================================
--- PLAYBACK ENGINE (WAIT FOR CASH FIXED)
+-- PLAYBACK ENGINE (MULTI & SINGLE MACRO PLAY)
 -- ==========================================
-local function playMacro()
-    if isPlaying or #recordedActions == 0 then return end
+playMacroQueue = function(queue)
+    if isPlaying or isRecording then return end
+    if not queue or #queue == 0 then
+        StatusLabel.Text = "Status: Queue Kosong / Tidak ada macro!"
+        return
+    end
 
     local functionsFolder = ReplicatedStorage:FindFirstChild("Functions")
     local spawnRemote = functionsFolder and functionsFolder:FindFirstChild("SpawnTower")
@@ -674,161 +717,180 @@ local function playMacro()
     end
 
     setGameSpeed(currentSpeedMultiplier)
-
     isPlaying = true
-    placedTowersPlay = {}
-    logConsole("--- Memulai Playback Macro ---")
-    
-    local playStartTime = tick()
+    logConsole("--- Memulai Sequence Playback ---")
 
     task.spawn(function()
-        for index, action in ipairs(recordedActions) do
+        local totalMacros = #queue
+        for mIdx, macroName in ipairs(queue) do
             if not isPlaying then break end
 
-            local targetTime = action.time / currentSpeedMultiplier
-            local timeToWait = targetTime - (tick() - playStartTime)
-
-            while timeToWait > 0 and isPlaying do
-                targetTime = action.time / currentSpeedMultiplier
-                timeToWait = targetTime - (tick() - playStartTime)
-
-                StatusLabel.Text = string.format("Status: Playing (x%d)...\n[%d/%d] Next: %s\nWait: %.1fs", currentSpeedMultiplier, index, #recordedActions, action.actionType, math.max(timeToWait, 0))
-                task.wait(math.min(timeToWait, 0.05))
+            local loadSuccess = true
+            if macroName ~= "" then
+                loadSuccess = loadMacroFromFile(macroName)
             end
 
-            if not isPlaying then break end
+            if not loadSuccess or #recordedActions == 0 then
+                logConsole(string.format("[MULTI PLAY WARN] Macro '%s' tidak dapat dimuat/kosong! Dilewati.", tostring(macroName)))
+                continue
+            end
 
-            if action.actionType == "Place" then
-                StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Place Tower #%d", index, #recordedActions, action.towerIndex)
+            placedTowersPlay = {}
+            local playStartTime = tick()
 
-                local newTowerInstance = nil
-                local maxAttempts = 600
+            logConsole(string.format("--- Memulai Macro (%d/%d): %s ---", mIdx, totalMacros, selectedMacroFile))
 
-                for attempt = 1, maxAttempts do
-                    if not isPlaying then break end
+            for index, action in ipairs(recordedActions) do
+                if not isPlaying then break end
 
-                    local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+                local targetTime = action.time / currentSpeedMultiplier
+                local timeToWait = targetTime - (tick() - playStartTime)
 
-                    if action.cframe then
-                        newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
+                while timeToWait > 0 and isPlaying do
+                    targetTime = action.time / currentSpeedMultiplier
+                    timeToWait = targetTime - (tick() - playStartTime)
+
+                    StatusLabel.Text = string.format("Status: Playing Multi (%d/%d: %s)\n[%d/%d] Next: %s\nWait: %.1fs", 
+                        mIdx, totalMacros, selectedMacroFile, index, #recordedActions, action.actionType, math.max(timeToWait, 0))
+                    task.wait(math.min(timeToWait, 0.05))
+                end
+
+                if not isPlaying then break end
+
+                if action.actionType == "Place" then
+                    StatusLabel.Text = string.format("Status: Playing (%d/%d: %s)...\n[%d/%d] Place Tower #%d", mIdx, totalMacros, selectedMacroFile, index, #recordedActions, action.towerIndex)
+
+                    local newTowerInstance = nil
+                    local maxAttempts = 600
+
+                    for attempt = 1, maxAttempts do
+                        if not isPlaying then break end
+
+                        local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+
+                        if action.cframe then
+                            newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
+                        end
+
+                        if not newTowerInstance then
+                            local result = spawnRemote:InvokeServer(
+                                action.towerName,
+                                action.cframe,
+                                action.arg3,
+                                action.arg4,
+                                action.arg5
+                            )
+
+                            if typeof(result) == "Instance" then
+                                newTowerInstance = result
+                            elseif typeof(result) == "table" and result[1] then
+                                newTowerInstance = result[1]
+                            end
+
+                            if not newTowerInstance and action.cframe then
+                                local searchStart = tick()
+                                repeat
+                                    task.wait(0.05)
+                                    newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
+                                until newTowerInstance or (tick() - searchStart > 1.5)
+                            end
+                        end
+
+                        if newTowerInstance then
+                            placedTowersPlay[action.towerIndex] = newTowerInstance
+                            logConsole(string.format("[PLAY %d/%d] Placed Tower #%d: %s", index, #recordedActions, action.towerIndex, tostring(newTowerInstance)))
+                            break
+                        else
+                            StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                            task.wait(0.2)
+                        end
                     end
 
                     if not newTowerInstance then
-                        local result = spawnRemote:InvokeServer(
-                            action.towerName,
-                            action.cframe,
-                            action.arg3,
-                            action.arg4,
-                            action.arg5
-                        )
-
-                        if typeof(result) == "Instance" then
-                            newTowerInstance = result
-                        elseif typeof(result) == "table" and result[1] then
-                            newTowerInstance = result[1]
-                        end
-
-                        if not newTowerInstance and action.cframe then
-                            local searchStart = tick()
-                            repeat
-                                task.wait(0.05)
-                                newTowerInstance = findTowerByPosition(action.cframe, 8, ignoreList)
-                            until newTowerInstance or (tick() - searchStart > 1.5)
-                        end
+                        logConsole(string.format("[PLAY ERROR] Gagal Place Tower #%d setelah %d percobaan!", action.towerIndex, maxAttempts))
                     end
 
-                    if newTowerInstance then
-                        placedTowersPlay[action.towerIndex] = newTowerInstance
-                        logConsole(string.format("[PLAY %d/%d] Placed Tower #%d: %s", index, #recordedActions, action.towerIndex, tostring(newTowerInstance)))
-                        break
-                    else
-                        StatusLabel.Text = string.format("Status: Waiting Cash...\n[%d/%d] Place Tower #%d\nRetry (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                        task.wait(0.2)
-                    end
-                end
+                elseif action.actionType == "Upgrade" then
+                    StatusLabel.Text = string.format("Status: Playing (%d/%d: %s)...\n[%d/%d] Upgrade Tower #%d", mIdx, totalMacros, selectedMacroFile, index, #recordedActions, action.towerIndex)
 
-                if not newTowerInstance then
-                    logConsole(string.format("[PLAY ERROR] Gagal Place Tower #%d setelah %d percobaan!", action.towerIndex, maxAttempts))
-                end
+                    local successUpgrade = false
+                    local maxAttempts = 300
 
-            elseif action.actionType == "Upgrade" then
-                StatusLabel.Text = string.format("Status: Playing...\n[%d/%d] Upgrade Tower #%d", index, #recordedActions, action.towerIndex)
+                    for attempt = 1, maxAttempts do
+                        if not isPlaying then break end
 
-                local successUpgrade = false
-                local maxAttempts = 300 -- Memberikan waktu hingga ~75 detik untuk mengumpulkan uang
+                        local targetTower = placedTowersPlay[action.towerIndex]
 
-                for attempt = 1, maxAttempts do
-                    if not isPlaying then break end
+                        if not targetTower or not targetTower:IsDescendantOf(Workspace) then
+                            local correspondingPlaceAction = nil
+                            for _, act in ipairs(recordedActions) do
+                                if act.actionType == "Place" and act.towerIndex == action.towerIndex then
+                                    correspondingPlaceAction = act
+                                    break
+                                end
+                            end
 
-                    local targetTower = placedTowersPlay[action.towerIndex]
+                            if correspondingPlaceAction and correspondingPlaceAction.cframe then
+                                local ignoreList = getPlacedTowersPlayList(action.towerIndex)
+                                local currentRadius = (attempt > 10) and 15 or 8
+                                targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
+                                
+                                if targetTower then
+                                    placedTowersPlay[action.towerIndex] = targetTower
+                                end
+                            end
+                        end
 
-                    if not targetTower or not targetTower:IsDescendantOf(Workspace) then
-                        local correspondingPlaceAction = nil
-                        for _, act in ipairs(recordedActions) do
-                            if act.actionType == "Place" and act.towerIndex == action.towerIndex then
-                                correspondingPlaceAction = act
+                        if targetTower then
+                            local isMaxLevel = false
+                            pcall(function()
+                                if targetTower:GetAttribute("Max") == true or targetTower:GetAttribute("IsMax") == true then
+                                    isMaxLevel = true
+                                elseif targetTower:FindFirstChild("Max") or targetTower:FindFirstChild("IsMax") then
+                                    isMaxLevel = true
+                                end
+                            end)
+
+                            if isMaxLevel then
+                                logConsole(string.format("[PLAY MAX DETECTED] Tower #%d sudah MAX. Menyeberang ke aksi berikutnya.", action.towerIndex))
+                                successUpgrade = true
+                                break
+                            end
+
+                            local res
+                            if action.extraArgs and #action.extraArgs > 0 then
+                                res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
+                            else
+                                res = upgradeRemote:InvokeServer(targetTower, action.towerName)
+                            end
+                            
+                            if res == false then
+                                res = upgradeRemote:InvokeServer(targetTower)
+                            end
+
+                            if res ~= false and res ~= nil then
+                                successUpgrade = true
+                                logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
                                 break
                             end
                         end
 
-                        if correspondingPlaceAction and correspondingPlaceAction.cframe then
-                            local ignoreList = getPlacedTowersPlayList(action.towerIndex)
-                            local currentRadius = (attempt > 10) and 15 or 8
-                            targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
-                            
-                            if targetTower then
-                                placedTowersPlay[action.towerIndex] = targetTower
-                            end
-                        end
+                        StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nAttempt (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
+                        task.wait(0.25)
                     end
 
-                    if targetTower then
-                        -- Cek jika game memiliki atribut penanda MAX langsung pada model tower
-                        local isMaxLevel = false
-                        pcall(function()
-                            if targetTower:GetAttribute("Max") == true or targetTower:GetAttribute("IsMax") == true then
-                                isMaxLevel = true
-                            elseif targetTower:FindFirstChild("Max") or targetTower:FindFirstChild("IsMax") then
-                                isMaxLevel = true
-                            end
-                        end)
-
-                        if isMaxLevel then
-                            logConsole(string.format("[PLAY MAX DETECTED] Tower #%d sudah MAX. Menyeberang ke aksi berikutnya.", action.towerIndex))
-                            successUpgrade = true
-                            break
-                        end
-
-                        local res
-                        if action.extraArgs and #action.extraArgs > 0 then
-                            res = upgradeRemote:InvokeServer(targetTower, unpack(action.extraArgs))
-                        else
-                            res = upgradeRemote:InvokeServer(targetTower, action.towerName)
-                        end
-                        
-                        if res == false then
-                            res = upgradeRemote:InvokeServer(targetTower)
-                        end
-
-                        if res ~= false and res ~= nil then
-                            successUpgrade = true
-                            logConsole(string.format("[PLAY %d/%d] Upgraded Tower #%d (%s)", index, #recordedActions, action.towerIndex, targetTower.Name))
-                            break
-                        end
+                    if not successUpgrade then
+                        logConsole(string.format("[PLAY TIMEOUT] Upgrade Tower #%d dilewati setelah batas waktu habis.", action.towerIndex))
                     end
-
-                    StatusLabel.Text = string.format("Status: Waiting Cash for Upgrade...\n[%d/%d] Upgrade Tower #%d\nAttempt (%d/%d)", index, #recordedActions, action.towerIndex, attempt, maxAttempts)
-                    task.wait(0.25)
-                end
-
-                if not successUpgrade then
-                    logConsole(string.format("[PLAY TIMEOUT] Upgrade Tower #%d dilewati setelah batas waktu habis.", action.towerIndex))
                 end
             end
+
+            logConsole(string.format("--- Selesai Macro (%d/%d): %s ---", mIdx, totalMacros, selectedMacroFile))
+            task.wait(0.5)
         end
 
-        logConsole("--- Playback Selesai ---")
-        StatusLabel.Text = string.format("Status: Playback Finished!\nTotal Aksi: %d", #recordedActions)
+        logConsole("--- Playback Sequence Selesai ---")
+        StatusLabel.Text = string.format("Status: Playback Finished!\nTotal Macro Diputar: %d", totalMacros)
         isPlaying = false
     end)
 end
@@ -855,11 +917,46 @@ RecordBtn.MouseButton1Click:Connect(function()
 end)
 
 PlayBtn.MouseButton1Click:Connect(function()
-    if not isRecording and not isPlaying then playMacro() end
+    if isPlaying then
+        isPlaying = false
+        StatusLabel.Text = "Status: Playback Dihentikan."
+        return
+    end
+
+    if not isRecording then
+        if selectedMacroFile ~= "" then
+            playMacroQueue({selectedMacroFile})
+        elseif #recordedActions > 0 then
+            playMacroQueue({""})
+        else
+            StatusLabel.Text = "Status: Pilih/Load Macro terlebih dahulu!"
+        end
+    end
+end)
+
+PlayMultiBtn.MouseButton1Click:Connect(function()
+    if isPlaying then
+        isPlaying = false
+        StatusLabel.Text = "Status: Multi Play Dihentikan."
+        return
+    end
+
+    if not isRecording then
+        local multiList = getMultiMacroList()
+        if #multiList > 0 then
+            playMacroQueue(multiList)
+        else
+            StatusLabel.Text = "Status: Isi daftar Multi Macro (misal: Macro1, Macro2)"
+        end
+    end
 end)
 
 SaveBtn.MouseButton1Click:Connect(function()
     if SaveNameBox.Text ~= "" then saveMacroToFile(SaveNameBox.Text) end
+end)
+
+MultiNameBox.FocusLost:Connect(function()
+    saveConfigToFile()
 end)
 
 RefreshBtn.MouseButton1Click:Connect(function()
@@ -1057,13 +1154,21 @@ task.spawn(function()
         if isMatchActuallyStarted() then
             setGameSpeed(currentSpeedMultiplier)
 
-            if isAutoPlayEnabled and not isPlaying and not isRecording and #recordedActions > 0 and not hasAutoPlayedThisSession then
+            if isAutoPlayEnabled and not isPlaying and not isRecording and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 for i = 13, 1, -1 do
                     StatusLabel.Text = string.format("Status: Match Detected!\nWaiting Spawn Buffer: %d s", i)
                     task.wait(1)
                 end
-                playMacro()
+
+                local multiList = getMultiMacroList()
+                if #multiList > 0 then
+                    playMacroQueue(multiList)
+                elseif selectedMacroFile ~= "" then
+                    playMacroQueue({selectedMacroFile})
+                elseif #recordedActions > 0 then
+                    playMacroQueue({""})
+                end
             end
         else
             hasAutoPlayedThisSession = false
