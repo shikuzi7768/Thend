@@ -696,11 +696,18 @@ rawNamecall = hookmetamethod(game, "__namecall", function(self, ...)
                     table.insert(extraArgs, args[i])
                 end
 
+                local towerCFrame = nil
+                if targetTower and typeof(targetTower) == "Instance" then
+                    local primaryPart = targetTower.PrimaryPart or targetTower:FindFirstChildWhichIsA("BasePart")
+                    if primaryPart then towerCFrame = primaryPart.CFrame end
+                end
+
                 table.insert(recordedActions, {
                     actionType = "Upgrade",
                     time = currentTime,
                     towerIndex = towerIndex,
                     towerName = towerName,
+                    cframe = towerCFrame,
                     extraArgs = extraArgs
                 })
 
@@ -738,6 +745,8 @@ playMacroQueue = function(queue)
 
     setGameSpeed(currentSpeedMultiplier)
     isPlaying = true
+    placedTowersPlay = {} -- Disimpan secara global sepanjang antrean Multi Play
+    local globalPlaceActions = {} -- Menyimpan riwayat Place CFrame antar file makro
     logConsole("--- Memulai Sequence Playback ---")
 
     task.spawn(function()
@@ -755,7 +764,6 @@ playMacroQueue = function(queue)
                 continue
             end
 
-            placedTowersPlay = {}
             local playStartTime = tick()
 
             logConsole(string.format("--- Memulai Macro (%d/%d): %s ---", mIdx, totalMacros, selectedMacroFile))
@@ -778,6 +786,7 @@ playMacroQueue = function(queue)
                 if not isPlaying then break end
 
                 if action.actionType == "Place" then
+                    globalPlaceActions[action.towerIndex] = action
                     StatusLabel.Text = string.format("Status: Playing (%d/%d: %s)...\n[%d/%d] Place Tower #%d", mIdx, totalMacros, selectedMacroFile, index, #recordedActions, action.towerIndex)
 
                     local newTowerInstance = nil
@@ -841,19 +850,27 @@ playMacroQueue = function(queue)
 
                         local targetTower = placedTowersPlay[action.towerIndex]
 
+                        -- Jika tower belum terdaftar di daftar aktif, gunakan CFrame fallback
                         if not targetTower or not targetTower:IsDescendantOf(Workspace) then
-                            local correspondingPlaceAction = nil
-                            for _, act in ipairs(recordedActions) do
-                                if act.actionType == "Place" and act.towerIndex == action.towerIndex then
-                                    correspondingPlaceAction = act
-                                    break
+                            local targetCFrame = action.cframe
+
+                            if not targetCFrame and globalPlaceActions[action.towerIndex] then
+                                targetCFrame = globalPlaceActions[action.towerIndex].cframe
+                            end
+
+                            if not targetCFrame then
+                                for _, act in ipairs(recordedActions) do
+                                    if act.actionType == "Place" and act.towerIndex == action.towerIndex then
+                                        targetCFrame = act.cframe
+                                        break
+                                    end
                                 end
                             end
 
-                            if correspondingPlaceAction and correspondingPlaceAction.cframe then
+                            if targetCFrame then
                                 local ignoreList = getPlacedTowersPlayList(action.towerIndex)
                                 local currentRadius = (attempt > 10) and 15 or 8
-                                targetTower = findTowerByPosition(correspondingPlaceAction.cframe, currentRadius, ignoreList)
+                                targetTower = findTowerByPosition(targetCFrame, currentRadius, ignoreList)
                                 
                                 if targetTower then
                                     placedTowersPlay[action.towerIndex] = targetTower
@@ -924,6 +941,18 @@ RecordBtn.MouseButton1Click:Connect(function()
         isRecording = true
         recordedActions = {}
         placedTowersRecord = {}
+
+        -- Scan tower yang sudah terpasang jika perekaman dimulai pertengahan game
+        local towersFolder = Workspace:FindFirstChild("Towers") or Workspace
+        for _, obj in ipairs(towersFolder:GetChildren()) do
+            if obj:IsA("Model") and obj ~= LocalPlayer.Character then
+                local primaryPart = obj.PrimaryPart or obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChildWhichIsA("BasePart")
+                if primaryPart and (obj:FindFirstChild("Humanoid") or obj:GetAttribute("Tower") or string.find(string.lower(obj.Name), "tower")) then
+                    table.insert(placedTowersRecord, obj)
+                end
+            end
+        end
+
         recordStartTime = tick()
         RecordBtn.Text = "Recording... (Stop)"
         RecordBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
