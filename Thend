@@ -23,7 +23,8 @@ local isRecording = false
 local isPlaying = false
 local recordStartTime = 0
 local selectedMacroFile = ""
-local isAutoPlayEnabled = false
+local isAutoPlaySingleEnabled = false
+local isAutoPlayMultiEnabled = false
 local currentSpeedMultiplier = 1
 local isAutoSummonEnabled = false
 
@@ -44,7 +45,7 @@ local function logConsole(msg)
 end
 
 -- Forward Declarations
-local saveConfigToFile, loadConfigFromFile, loadMacroFromFile, playMacroQueue, getMultiMacroList
+local saveConfigToFile, loadConfigFromFile, loadMacroFromFile, playMacroQueue, getMultiMacroList, updateAutoPlayUI
 
 -- ==========================================
 -- HELPER FUNCTIONS (ENHANCED TOWER LOOKUP)
@@ -307,17 +308,29 @@ DeleteBtn.TextSize = 12
 DeleteBtn.Parent = ContentFrame
 Instance.new("UICorner", DeleteBtn).CornerRadius = UDim.new(0, 4)
 
--- Auto Play Toggle Button
-local AutoPlayBtn = Instance.new("TextButton")
-AutoPlayBtn.Size = UDim2.new(0.9, 0, 0, 30)
-AutoPlayBtn.Position = UDim2.new(0.05, 0, 0, 200)
-AutoPlayBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
-AutoPlayBtn.Text = "Auto Play: OFF"
-AutoPlayBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-AutoPlayBtn.Font = Enum.Font.SourceSansBold
-AutoPlayBtn.TextSize = 13
-AutoPlayBtn.Parent = ContentFrame
-Instance.new("UICorner", AutoPlayBtn).CornerRadius = UDim.new(0, 4)
+-- Auto Single Toggle Button
+local AutoSingleBtn = Instance.new("TextButton")
+AutoSingleBtn.Size = UDim2.new(0.43, 0, 0, 30)
+AutoSingleBtn.Position = UDim2.new(0.05, 0, 0, 200)
+AutoSingleBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+AutoSingleBtn.Text = "Auto Single: OFF"
+AutoSingleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoSingleBtn.Font = Enum.Font.SourceSansBold
+AutoSingleBtn.TextSize = 11
+AutoSingleBtn.Parent = ContentFrame
+Instance.new("UICorner", AutoSingleBtn).CornerRadius = UDim.new(0, 4)
+
+-- Auto Multi Toggle Button
+local AutoMultiBtn = Instance.new("TextButton")
+AutoMultiBtn.Size = UDim2.new(0.43, 0, 0, 30)
+AutoMultiBtn.Position = UDim2.new(0.52, 0, 0, 200)
+AutoMultiBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+AutoMultiBtn.Text = "Auto Multi: OFF"
+AutoMultiBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoMultiBtn.Font = Enum.Font.SourceSansBold
+AutoMultiBtn.TextSize = 11
+AutoMultiBtn.Parent = ContentFrame
+Instance.new("UICorner", AutoMultiBtn).CornerRadius = UDim.new(0, 4)
 
 -- Speed Multiplier Toggle Button
 local SpeedBtn = Instance.new("TextButton")
@@ -427,6 +440,14 @@ end)
 -- ==========================================
 -- SAVE & LOAD CONFIG / MACRO SYSTEM
 -- ==========================================
+updateAutoPlayUI = function()
+    AutoSingleBtn.Text = isAutoPlaySingleEnabled and "Auto Single: ON" or "Auto Single: OFF"
+    AutoSingleBtn.BackgroundColor3 = isAutoPlaySingleEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+    
+    AutoMultiBtn.Text = isAutoPlayMultiEnabled and "Auto Multi: ON" or "Auto Multi: OFF"
+    AutoMultiBtn.BackgroundColor3 = isAutoPlayMultiEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+end
+
 getMultiMacroList = function()
     local text = MultiNameBox.Text
     local list = {}
@@ -442,7 +463,8 @@ end
 saveConfigToFile = function()
     if not supportsFileSystem then return end
     local configData = {
-        autoPlay = isAutoPlayEnabled,
+        autoPlaySingle = isAutoPlaySingleEnabled,
+        autoPlayMulti = isAutoPlayMultiEnabled,
         autoVote = isAutoVoteEnabled,
         autoVoteDiff = isAutoVoteDiffEnabled,
         speedMultiplier = currentSpeedMultiplier,
@@ -463,11 +485,9 @@ loadConfigFromFile = function()
     end)
 
     if success and typeof(result) == "table" then
-        if result.autoPlay ~= nil then
-            isAutoPlayEnabled = result.autoPlay
-            AutoPlayBtn.Text = isAutoPlayEnabled and "Auto Play: ON" or "Auto Play: OFF"
-            AutoPlayBtn.BackgroundColor3 = isAutoPlayEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
-        end
+        if result.autoPlaySingle ~= nil then isAutoPlaySingleEnabled = result.autoPlaySingle end
+        if result.autoPlayMulti ~= nil then isAutoPlayMultiEnabled = result.autoPlayMulti end
+        updateAutoPlayUI()
 
         if result.autoVote ~= nil then
             isAutoVoteEnabled = result.autoVote
@@ -750,7 +770,7 @@ playMacroQueue = function(queue)
                     targetTime = action.time / currentSpeedMultiplier
                     timeToWait = targetTime - (tick() - playStartTime)
 
-                    StatusLabel.Text = string.format("Status: Playing Multi (%d/%d: %s)\n[%d/%d] Next: %s\nWait: %.1fs", 
+                    StatusLabel.Text = string.format("Status: Playing (%d/%d: %s)\n[%d/%d] Next: %s\nWait: %.1fs", 
                         mIdx, totalMacros, selectedMacroFile, index, #recordedActions, action.actionType, math.max(timeToWait, 0))
                     task.wait(math.min(timeToWait, 0.05))
                 end
@@ -1001,10 +1021,21 @@ DeleteBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-AutoPlayBtn.MouseButton1Click:Connect(function()
-    isAutoPlayEnabled = not isAutoPlayEnabled
-    AutoPlayBtn.Text = isAutoPlayEnabled and "Auto Play: ON" or "Auto Play: OFF"
-    AutoPlayBtn.BackgroundColor3 = isAutoPlayEnabled and Color3.fromRGB(40, 160, 40) or Color3.fromRGB(100, 40, 40)
+AutoSingleBtn.MouseButton1Click:Connect(function()
+    isAutoPlaySingleEnabled = not isAutoPlaySingleEnabled
+    if isAutoPlaySingleEnabled then
+        isAutoPlayMultiEnabled = false
+    end
+    updateAutoPlayUI()
+    saveConfigToFile()
+end)
+
+AutoMultiBtn.MouseButton1Click:Connect(function()
+    isAutoPlayMultiEnabled = not isAutoPlayMultiEnabled
+    if isAutoPlayMultiEnabled then
+        isAutoPlaySingleEnabled = false
+    end
+    updateAutoPlayUI()
     saveConfigToFile()
 end)
 
@@ -1154,20 +1185,28 @@ task.spawn(function()
         if isMatchActuallyStarted() then
             setGameSpeed(currentSpeedMultiplier)
 
-            if isAutoPlayEnabled and not isPlaying and not isRecording and not hasAutoPlayedThisSession then
+            if (isAutoPlaySingleEnabled or isAutoPlayMultiEnabled) and not isPlaying and not isRecording and not hasAutoPlayedThisSession then
                 hasAutoPlayedThisSession = true
                 for i = 13, 1, -1 do
                     StatusLabel.Text = string.format("Status: Match Detected!\nWaiting Spawn Buffer: %d s", i)
                     task.wait(1)
                 end
 
-                local multiList = getMultiMacroList()
-                if #multiList > 0 then
-                    playMacroQueue(multiList)
-                elseif selectedMacroFile ~= "" then
-                    playMacroQueue({selectedMacroFile})
-                elseif #recordedActions > 0 then
-                    playMacroQueue({""})
+                if isAutoPlaySingleEnabled then
+                    if selectedMacroFile ~= "" then
+                        playMacroQueue({selectedMacroFile})
+                    elseif #recordedActions > 0 then
+                        playMacroQueue({""})
+                    else
+                        logConsole("[AUTO PLAY SINGLE WARN] Tidak ada single macro yang terpilih!")
+                    end
+                elseif isAutoPlayMultiEnabled then
+                    local multiList = getMultiMacroList()
+                    if #multiList > 0 then
+                        playMacroQueue(multiList)
+                    else
+                        logConsole("[AUTO PLAY MULTI WARN] Daftar Multi Macro kosong!")
+                    end
                 end
             end
         else
